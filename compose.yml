@@ -1,0 +1,14 @@
+services:
+  kasa-nice:
+    build: .
+    ports:
+      - "8080:8080"
+    network_mode: "host"
+    environment:
+      - PYTHONUNBUFFERED=1
+      - KASA_HOST=0.0.0.0
+      - KASA_PORT=8080
+    volumes:
+      - ./logs:/app/logs
+    restart: unless-stopped
+

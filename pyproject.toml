@@ -1,0 +1,77 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "kasa-nice"
+version = "1.1.0"
+description = "A modern, containerized desktop GUI application for controlling TP-Link Kasa smart home devices"
+requires-python = ">=3.13.5"
+authors = [
+    {name = "Kasa-Nice Contributors"},
+]
+keywords = ["kasa", "smart-home", "tp-link", "gui", "nicegui"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Home Automation",
+]
+
+dependencies = [
+    "python-kasa==0.10.2",
+    "nicegui==2.11.1",
+    "tzdata==2025.1",
+    "plotly==6.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "ruff>=0.8.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/ryandavila/Kasa-Nice"
+Repository = "https://github.com/ryandavila/Kasa-Nice"
+Issues = "https://github.com/ryandavila/Kasa-Nice/issues"
+
+[project.scripts]
+kasa-nice = "kasa_nice.main:main"
+
+[tool.ruff]
+target-version = "py313"
+line-length = 88
+fix = true
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings (includes W292 missing-newline-at-end-of-file)
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "UP",  # pyupgrade
+]
+ignore = [
+    "E501",  # line too long, handled by formatter
+    "B008",  # do not perform function calls in argument defaults
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "lf"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.12.7",
+]

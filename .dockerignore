@@ -1,0 +1,17 @@
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.git
+.gitignore
+README.md
+.pytest_cache
+.coverage
+.nyc_output
+.cache
+.vscode
+.idea
+Dockerfile
+compose.yml
+requirements.txt
+.uv-cache

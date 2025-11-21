@@ -1,4 +1,3 @@
-import asyncio
 import os
 from colorsys import hsv_to_rgb, rgb_to_hsv
 
@@ -109,40 +108,6 @@ async def handle_lightstrip(dev_alias, effect, switch):
             switch.value = True
 
 
-async def handle_discovery(ip_address):
-    discovery_result.clear()
-    div_element.clear()
-    discovery_result.text = f"Discovering: {ip_address}"
-    with div_element:
-        spinner = ui.spinner("dots", size="lg", color="primary")
-        spinner.visible = True
-    response = await Discover.discover(target=ip_address)
-    spinner.visible = False
-    discovery_result.text = ""
-    with div_element:
-        for device in response.values():
-            with ui.row() as row:
-                set_device_icon(device.device_type.name)
-                ui.switch(
-                    text=device.alias,
-                    value=device.is_on,
-                    on_change=lambda v, dev=device: dev.turn_on()
-                    if v.value
-                    else dev.turn_off(),
-                )
-
-                def create_pin_handler(current_row, button):
-                    def handler():
-                        current_row.move(pinned_devices)
-                        discovery_result.set_text("")
-                        button.delete()
-
-                    return handler
-
-                pin_button = ui.icon("push_pin").classes("text-2xl text-primary")
-                pin_button.on("click", create_pin_handler(row, pin_button))
-
-
 async def kasa_device_on_off(dev_alias, boolean):
     for device in devices.values():
         if device.alias == dev_alias:
@@ -171,7 +136,7 @@ async def kasa_child_on_off(dev_alias, boolean):
                         await plug.turn_off()
 
 
-@ui.page('/')
+@ui.page("/")
 def index():
     """Main page for Kasa-Nice controller."""
     ui.colors(primary="#4acbd6")
@@ -185,7 +150,6 @@ def index():
             ip_checkbox = ui.checkbox("Show device IP address")
             md_checkbox = ui.checkbox("Show device model")
             ui.label("Please ensure that none of your devices share the same alias.")
-            ui.separator()
             ui.separator()
             ui.button(icon="close", on_click=drawer.toggle)
 
@@ -202,10 +166,10 @@ def index():
                     if device.device_type.name == type:
                         with ui.row().classes("w-full"):
                             set_device_icon(device.device_type.name)
-                            device_ip = ui.label(text=device.host).bind_visibility_from(
+                            ui.label(text=device.host).bind_visibility_from(
                                 ip_checkbox, "value"
                             )
-                            modelname = ui.label(text=device.model).bind_visibility_from(
+                            ui.label(text=device.model).bind_visibility_from(
                                 md_checkbox, "value"
                             )
 
@@ -251,7 +215,7 @@ def index():
                                         )
                                 if dev_sys_info.get("is_dimmable", 0):
                                     light = device.modules[Module.Light]
-                                    slider = ui.slider(
+                                    ui.slider(
                                         min=0,
                                         max=100,
                                         value=light.brightness,
@@ -267,13 +231,51 @@ def index():
                 ui.separator()
 
         with ui.tab_panel(two):
+            # Define discovery UI elements
+            discovery_result = ui.label()
+            div_element = ui.element()
+            pinned_devices = ui.element()
+
+            # Define discovery handler with access to UI elements
+            async def handle_discovery(ip_address):
+                discovery_result.clear()
+                div_element.clear()
+                discovery_result.text = f"Discovering: {ip_address}"
+                with div_element:
+                    spinner = ui.spinner("dots", size="lg", color="primary")
+                    spinner.visible = True
+                response = await Discover.discover(target=ip_address)
+                spinner.visible = False
+                discovery_result.text = ""
+                with div_element:
+                    for device in response.values():
+                        with ui.row() as row:
+                            set_device_icon(device.device_type.name)
+                            ui.switch(
+                                text=device.alias,
+                                value=device.is_on,
+                                on_change=lambda v, dev=device: dev.turn_on()
+                                if v.value
+                                else dev.turn_off(),
+                            )
+
+                            def create_pin_handler(current_row, button):
+                                def handler():
+                                    current_row.move(pinned_devices)
+                                    discovery_result.set_text("")
+                                    button.delete()
+
+                                return handler
+
+                            pin_button = ui.icon("push_pin").classes(
+                                "text-2xl text-primary"
+                            )
+                            pin_button.on("click", create_pin_handler(row, pin_button))
+
             ui.input(label="LAN IP address", value="255.255.255.255").on(
                 "keydown.enter", lambda t: handle_discovery(t.sender.value)
             )
-            discovery_result = ui.label()
-            div_element = ui.element()
             ui.separator()
-            pinned_devices = ui.element()
 
         with ui.tab_panel(three):
             # draw_kasa_plots(devices)
@@ -285,7 +287,7 @@ def index():
         ui.image("/static/images/logo.png").classes("w-24")
 
     with ui.footer(value=False) as footer:
-        with ui.element() as tooltip:
+        with ui.element():
             ui.label(
                 "Discovery is useful when a local device is not appearing in your device list."
             )

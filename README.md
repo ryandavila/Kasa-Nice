@@ -111,7 +111,7 @@ All devices supported by the python-kasa library:
 
 ### Prerequisites
 
-- Python 3.13.5+
+- Python 3.14+
 - [uv](https://docs.astral.sh/uv/) (recommended for fast dependency management)
 - Docker (optional)
 
@@ -181,7 +181,7 @@ This fork includes various improvements:
 - Simplified file structure for Docker webapp deployment
 - Enhanced code quality with ruff linting and formatting
 - Docker containerization improvements
-- Updated dependencies and Python 3.13 support
+- Updated dependencies and Python 3.14 support
 
 ## Acknowledgments
 

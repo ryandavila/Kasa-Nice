@@ -14,9 +14,25 @@ logger = get_logger(__name__)
 # https://github.com/python-kasa/python-kasa/issues/345 #pertaining to KL125 bulbs
 
 nicegui_app.add_static_files("/static", "static")
-ui.colors(primary="#4acbd6")
-dark = ui.dark_mode(True)
 devices = {}
+
+
+async def discover_devices():
+    """Discover and initialize Kasa devices on startup."""
+    global devices
+    logger.info("Starting device discovery")
+    discovered = await Discover.discover()
+    for addr, device in discovered.items():
+        try:
+            await device.update()
+        except Exception as e:
+            logger.error(f"Error updating device {addr}: {e}")
+    devices.update(discovered)
+    logger.info(f"Discovered {len(devices)} devices")
+
+
+# Register startup handler
+nicegui_app.on_startup(discover_devices)
 
 
 def hex_to_hsv(hex_color):
@@ -155,140 +171,133 @@ async def kasa_child_on_off(dev_alias, boolean):
                         await plug.turn_off()
 
 
-with ui.left_drawer(value=False) as drawer:
-    with ui.column():
-        with ui.row():
-            ui.button("Dark", on_click=dark.enable)
-            ui.button("Light", on_click=dark.disable)
-        ip_checkbox = ui.checkbox("Show device IP address")
-        md_checkbox = ui.checkbox("Show device model")
-        ui.label("Please ensure that none of your devices share the same alias.")
-        ui.separator()
-        ui.label("v1.0").classes("text-weight-thin text-subtitle2")
-        ui.link("GitHub", "https://github.com/uni-byte/Kasa-Nice")
-        ui.link("NiceGUI on GitHub", "https://github.com/zauberzeug/nicegui")
-        ui.link("Python-Kasa", "https://github.com/python-kasa/python-kasa")
-        ui.separator()
-        ui.button(icon="close", on_click=drawer.toggle)
+@ui.page('/')
+def index():
+    """Main page for Kasa-Nice controller."""
+    ui.colors(primary="#4acbd6")
+    dark = ui.dark_mode(True)
 
-with asyncio.Runner() as runner:
-    devices = runner.run(Discover.discover())
-    for addr, device in devices.items():
-        try:
-            runner.run(device.update())
-        except Exception as e:
-            logger.error(f"Error updating device {addr}: {e}")
-    runner.close()
+    with ui.left_drawer(value=False) as drawer:
+        with ui.column():
+            with ui.row():
+                ui.button("Dark", on_click=dark.enable)
+                ui.button("Light", on_click=dark.disable)
+            ip_checkbox = ui.checkbox("Show device IP address")
+            md_checkbox = ui.checkbox("Show device model")
+            ui.label("Please ensure that none of your devices share the same alias.")
+            ui.separator()
+            ui.separator()
+            ui.button(icon="close", on_click=drawer.toggle)
 
-with ui.tabs().classes("w-full") as tabs:
-    one = ui.tab("Devices")
-    two = ui.tab("Discovery")
-    three = ui.tab("Usage")
+    with ui.tabs().classes("w-full") as tabs:
+        one = ui.tab("Devices")
+        two = ui.tab("Discovery")
+        three = ui.tab("Usage")
 
-with ui.tab_panels(tabs, value=one).classes("w-full"):
-    with ui.tab_panel(one):
-        for type in ["Bulb", "Plug", "Dimmer", "Strip", "LightStrip"]:
-            ui.label(text=f"{type}s").classes("text-weight-bold")
-            for device in devices.values():
-                if device.device_type.name == type:
-                    with ui.row().classes("w-full"):
-                        set_device_icon(device.device_type.name)
-                        device_ip = ui.label(text=device.host).bind_visibility_from(
-                            ip_checkbox, "value"
-                        )
-                        modelname = ui.label(text=device.model).bind_visibility_from(
-                            md_checkbox, "value"
-                        )
+    with ui.tab_panels(tabs, value=one).classes("w-full"):
+        with ui.tab_panel(one):
+            for type in ["Bulb", "Plug", "Dimmer", "Strip", "LightStrip"]:
+                ui.label(text=f"{type}s").classes("text-weight-bold")
+                for device in devices.values():
+                    if device.device_type.name == type:
+                        with ui.row().classes("w-full"):
+                            set_device_icon(device.device_type.name)
+                            device_ip = ui.label(text=device.host).bind_visibility_from(
+                                ip_checkbox, "value"
+                            )
+                            modelname = ui.label(text=device.model).bind_visibility_from(
+                                md_checkbox, "value"
+                            )
 
-                        if len(device.children) >= 2:
-                            for child in device.children:
-                                ui.switch(
-                                    text=child.alias,
-                                    value=child.is_on,
-                                    on_change=lambda v: kasa_child_on_off(
-                                        v.sender.text, v.value
-                                    ),
-                                )
-                            continue
-
-                        switch = ui.switch(
-                            text=device.alias,
-                            value=device.is_on,
-                            on_change=lambda v: kasa_device_on_off(
-                                v.sender.text, v.value
-                            ),
-                        ).classes("w-[calc(20%-2px)]")
-                        if device.device_type.name in [
-                            "Bulb",
-                            "Strip",
-                            "Dimmer",
-                            "LightStrip",
-                        ]:
-                            dev_sys_info = device.sys_info
-                            if dev_sys_info.get("is_color", 0):
-                                light = device.modules[Module.Light]
-                                hex_color = hsv_to_hex(light.hsv)
-                                with ui.button(icon="colorize") as button:
-                                    button.style(
-                                        f"background-color:{hex_color}!important"
+                            if len(device.children) >= 2:
+                                for child in device.children:
+                                    ui.switch(
+                                        text=child.alias,
+                                        value=child.is_on,
+                                        on_change=lambda v: kasa_child_on_off(
+                                            v.sender.text, v.value
+                                        ),
                                     )
-                                    ui.color_picker(
-                                        on_pick=lambda e,
-                                        dev_alias=switch.text,
-                                        button=button,
-                                        switch=switch: handle_color_picker(
-                                            dev_alias, e.color, button, switch
+                                continue
+
+                            switch = ui.switch(
+                                text=device.alias,
+                                value=device.is_on,
+                                on_change=lambda v: kasa_device_on_off(
+                                    v.sender.text, v.value
+                                ),
+                            ).classes("w-[calc(20%-2px)]")
+                            if device.device_type.name in [
+                                "Bulb",
+                                "Strip",
+                                "Dimmer",
+                                "LightStrip",
+                            ]:
+                                dev_sys_info = device.sys_info
+                                if dev_sys_info.get("is_color", 0):
+                                    light = device.modules[Module.Light]
+                                    hex_color = hsv_to_hex(light.hsv)
+                                    with ui.button(icon="colorize") as button:
+                                        button.style(
+                                            f"background-color:{hex_color}!important"
                                         )
-                                    )
-                            if dev_sys_info.get("is_dimmable", 0):
-                                light = device.modules[Module.Light]
-                                slider = ui.slider(
-                                    min=0,
-                                    max=100,
-                                    value=light.brightness,
-                                    on_change=lambda s,
-                                    dev_alias=switch.text,
-                                    switch=switch: handle_brightness(
-                                        dev_alias, s.value, switch
-                                    ),
-                                ).classes("w-[calc(50%-2px)]")
-                            # if device._has_effects:
-                            #   select1 = ui.select([effect for effect in device.effect_list], \
-                            #                       on_change=lambda e, dev_alias=switch.text, switch=switch: handle_lightstrip(dev_alias, e.value, switch))
+                                        ui.color_picker(
+                                            on_pick=lambda e,
+                                            dev_alias=switch.text,
+                                            button=button,
+                                            switch=switch: handle_color_picker(
+                                                dev_alias, e.color, button, switch
+                                            )
+                                        )
+                                if dev_sys_info.get("is_dimmable", 0):
+                                    light = device.modules[Module.Light]
+                                    slider = ui.slider(
+                                        min=0,
+                                        max=100,
+                                        value=light.brightness,
+                                        on_change=lambda s,
+                                        dev_alias=switch.text,
+                                        switch=switch: handle_brightness(
+                                            dev_alias, s.value, switch
+                                        ),
+                                    ).classes("w-[calc(50%-2px)]")
+                                # if device._has_effects:
+                                #   select1 = ui.select([effect for effect in device.effect_list], \
+                                #                       on_change=lambda e, dev_alias=switch.text, switch=switch: handle_lightstrip(dev_alias, e.value, switch))
+                ui.separator()
+
+        with ui.tab_panel(two):
+            ui.input(label="LAN IP address", value="255.255.255.255").on(
+                "keydown.enter", lambda t: handle_discovery(t.sender.value)
+            )
+            discovery_result = ui.label()
+            div_element = ui.element()
+            ui.separator()
+            pinned_devices = ui.element()
+
+        with ui.tab_panel(three):
+            # draw_kasa_plots(devices)
             ui.separator()
 
-    with ui.tab_panel(two):
-        ui.input(label="LAN IP address", value="255.255.255.255").on(
-            "keydown.enter", lambda t: handle_discovery(t.sender.value)
-        )
-        discovery_result = ui.label()
-        div_element = ui.element()
-        ui.separator()
-        pinned_devices = ui.element()
+    with ui.header() as header:
+        header.style("background-color:white!important")
+        ui.button(icon="menu", on_click=drawer.toggle)
+        ui.image("/static/images/logo.png").classes("w-24")
 
-    with ui.tab_panel(three):
-        # draw_kasa_plots(devices)
-        ui.separator()
+    with ui.footer(value=False) as footer:
+        with ui.element() as tooltip:
+            ui.label(
+                "Discovery is useful when a local device is not appearing in your device list."
+            )
+            ui.label(
+                "If you know the smart device's IP address, type it to directly look for that device."
+            )
+            ui.label(
+                "Otherwise, use '255.255.255.255' to find all discoverable devices in your local network."
+            )
 
-with ui.header() as header:
-    header.style("background-color:white!important")
-    ui.button(icon="menu", on_click=drawer.toggle)
-    ui.image("/static/images/logo.png").classes("w-24")
-
-with ui.footer(value=False) as footer:
-    with ui.element() as tooltip:
-        ui.label(
-            "Discovery is useful when a local device is not appearing in your device list."
-        )
-        ui.label(
-            "If you know the smart device's IP address, type it to directly look for that device."
-        )
-        ui.label(
-            "Otherwise, use '255.255.255.255' to find all discoverable devices in your local network."
-        )
-
-with ui.page_sticky(position="bottom-right", x_offset=20, y_offset=20):
-    ui.button(on_click=footer.toggle).props("fab icon=contact_support")
+    with ui.page_sticky(position="bottom-right", x_offset=20, y_offset=20):
+        ui.button(on_click=footer.toggle).props("fab icon=contact_support")
 
 
 def main():

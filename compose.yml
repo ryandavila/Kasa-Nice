@@ -1,8 +1,14 @@
 services:
   kasa-nice:
     build: .
+    # Default (bridge) networking works everywhere, including Docker Desktop on
+    # macOS/Windows. Note: broadcast discovery (UDP) does NOT cross the bridge —
+    # use the Discovery tab to add devices by IP if auto-discovery finds nothing.
     ports:
       - "8080:8080"
+    # On a Linux host, replace the `ports:` block above with host networking so
+    # UDP broadcast discovery can reach devices on your LAN:
+    #   network_mode: host
     environment:
       - PYTHONUNBUFFERED=1
       - KASA_HOST=0.0.0.0

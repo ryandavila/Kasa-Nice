@@ -1,42 +1,49 @@
-# sv
+# Kasa-Nice web
 
-Everything you need to build a Svelte project, powered by [`sv`](https://github.com/sveltejs/cli).
+The SvelteKit frontend for Kasa-Nice — a single-page app for discovering and
+controlling TP-Link Kasa devices. It talks to the FastAPI backend (`../api`)
+over a small REST API and polls for live device state.
 
-## Creating a project
+Built with Svelte 5 (runes), Tailwind CSS v4, and `@sveltejs/adapter-static`.
 
-If you're seeing this, you've probably already done this step. Congrats!
+## Develop
 
-```sh
-# create a new project
-npx sv create my-app
-```
-
-To recreate this project with the same configuration:
+Install dependencies and start the dev server (Vite, port 5173):
 
 ```sh
-# recreate this project
-bun x sv@0.16.1 create --template minimal --types ts --add eslint prettier tailwindcss="plugins:none" sveltekit-adapter="adapter:static" --no-download-check --install bun web
+bun install
+bun run dev
 ```
 
-## Developing
-
-Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
+The dev server proxies `/api/*` to the backend at `http://localhost:8080`
+(see [`vite.config.ts`](vite.config.ts)), so run the backend alongside it:
 
 ```sh
-npm run dev
-
-# or start the server and open the app in a new browser tab
-npm run dev -- --open
+# from the repo root
+uv run python -m api.main
 ```
 
-## Building
-
-To create a production version of your app:
+## Build
 
 ```sh
-npm run build
+bun run build      # outputs a static SPA to ./build
+bun run preview    # preview the production build
 ```
 
-You can preview the production build with `npm run preview`.
+In production the FastAPI backend serves `web/build` and owns everything under
+`/api`. The project `Dockerfile` builds this step automatically.
 
-> To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
+## Checks
+
+```sh
+bun run check      # svelte-check (type + a11y)
+bun run lint       # prettier + eslint
+bun run format     # apply prettier
+```
+
+## Layout
+
+- `src/routes` — pages (`+page.svelte` is the whole app: Devices, Energy, Discovery)
+- `src/lib/components` — UI components (device cards, charts, controls)
+- `src/lib/stores` — runes-based state (`devices`, `theme`, `toasts`)
+- `src/lib/api` — typed client and request/response types for the backend

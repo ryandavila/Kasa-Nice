@@ -18,9 +18,8 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev
 
-# Application code and assets
+# Application code
 COPY api/ ./api/
-COPY static/ ./static/
 
 # Built frontend from stage 1 (served by the API at /)
 COPY --from=web /web/build ./web/build

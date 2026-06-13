@@ -46,8 +46,8 @@ check: ## Type-check the frontend
 	cd web && bun run check
 
 # Testing commands
-test: ## Run tests (when available)
-	@echo "No tests configured yet. Add pytest tests in tests/ directory."
+test: ## Run the backend test suite with pytest
+	uv run pytest
 
 # Docker commands
 up: ## Start application with Docker Compose

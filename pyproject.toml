@@ -74,4 +74,10 @@ packages = ["api"]
 [dependency-groups]
 dev = [
     "ruff>=0.12.7",
+    "pytest>=8.0.0",
+    "httpx>=0.27",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

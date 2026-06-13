@@ -23,6 +23,8 @@ async def lifespan(app: FastAPI):
     logger.info("Starting Kasa-Nice API")
     try:
         await registry.discover_all()
+        if registry.scan_subnet:
+            await registry.discover_subnet(registry.scan_subnet)
     except Exception as e:  # noqa: BLE001 - never block startup on discovery
         logger.error(f"Initial discovery failed: {e}")
     yield

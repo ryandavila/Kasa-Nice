@@ -38,6 +38,12 @@ export interface UsageStat {
 	kwh: number;
 }
 
+/** Server-side configuration the UI needs (e.g. the default subnet to sweep). */
+export interface ServerConfig {
+	/** CIDR the server sweeps by unicast, or null if unconfigured. */
+	scan_subnet: string | null;
+}
+
 export interface Usage {
 	device_id: string;
 	/** Instantaneous power draw in watts. */

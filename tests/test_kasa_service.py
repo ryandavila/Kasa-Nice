@@ -162,3 +162,27 @@ def test_one_unreadable_device_does_not_drop_the_others(fake_discover):
 
     assert set(reg._devices) == {"10.0.0.1"}
     assert [serialize_device(d).alias for d in reg.all()] == ["Good"]
+
+
+# ── subnet sweep ─────────────────────────────────────────────────────────────
+
+
+def test_discover_subnet_finds_caches_and_skips_unreadable(tmp_path, fake_discover):
+    # Two hosts in a /30; one reads back, one fails update (e.g. wrong creds).
+    fake_discover.targets["10.0.0.1"] = {"10.0.0.1": FakeDevice("10.0.0.1", alias="A")}
+    fake_discover.targets["10.0.0.2"] = {
+        "10.0.0.2": FakeDevice("10.0.0.2", alias="B", fail_update=True)
+    }
+    store = HostStore(tmp_path / "hosts.json")
+    reg = DeviceRegistry(store)
+
+    found = asyncio.run(reg.discover_subnet("10.0.0.0/30"))
+
+    assert {d.host for d in found} == {"10.0.0.1"}  # B skipped, A served
+    assert set(reg._devices) == {"10.0.0.1"}
+    assert store.load() == {"10.0.0.1"}  # only the readable host is persisted
+
+
+def test_discover_subnet_rejects_bad_cidr():
+    with pytest.raises(ValueError, match="Invalid subnet"):
+        asyncio.run(DeviceRegistry().discover_subnet("not-a-subnet"))

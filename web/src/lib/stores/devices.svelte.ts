@@ -2,6 +2,7 @@ import {
 	listDevices,
 	getState,
 	discoverDevices,
+	scanSubnet,
 	setPower,
 	setBrightness,
 	setColorHex,
@@ -130,6 +131,13 @@ class DeviceStore {
 	/** Probe a single LAN address; merges results into the list. */
 	async discoverTarget(target: string): Promise<Device[]> {
 		const found = await discoverDevices(target);
+		for (const d of found) this.replace(d);
+		return found;
+	}
+
+	/** Unicast-sweep a whole subnet; merges any found devices into the list. */
+	async scanSubnet(subnet?: string): Promise<Device[]> {
+		const found = await scanSubnet(subnet);
 		for (const d of found) this.replace(d);
 		return found;
 	}

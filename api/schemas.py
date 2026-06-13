@@ -58,6 +58,23 @@ class DiscoverRequest(BaseModel):
     )
 
 
+class SubnetScanRequest(BaseModel):
+    subnet: str | None = Field(
+        default=None,
+        description="CIDR subnet to sweep by unicast, e.g. '10.3.27.0/24'. "
+        "Falls back to the server's KASA_SCAN_SUBNET when omitted.",
+    )
+
+
+class ServerConfig(BaseModel):
+    """Server-side configuration the frontend needs to render correctly."""
+
+    scan_subnet: str | None = Field(
+        default=None,
+        description="Default CIDR the server sweeps, or null if unconfigured.",
+    )
+
+
 class PowerRequest(BaseModel):
     on: bool
 

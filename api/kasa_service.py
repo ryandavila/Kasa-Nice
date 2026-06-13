@@ -5,6 +5,7 @@ This is the logic that previously lived inside the NiceGUI page handlers in
 """
 
 import asyncio
+import ipaddress
 import os
 from colorsys import hsv_to_rgb, rgb_to_hsv
 from pathlib import Path
@@ -63,6 +64,8 @@ class DeviceRegistry:
         self,
         store: HostStore | None = None,
         credentials: Credentials | None = None,
+        *,
+        scan_subnet: str | None = None,
     ) -> None:
         self._devices: dict[str, KasaDevice] = {}
         self._store = store
@@ -70,6 +73,10 @@ class DeviceRegistry:
         # authenticate before discovery; None (no creds) leaves legacy plugs
         # working and is equivalent to omitting the argument.
         self._credentials = credentials
+        # Optional CIDR (e.g. "10.3.27.0/24") swept by unicast on startup and from
+        # the Discovery tab — for devices on a separate subnet/VLAN that broadcast
+        # discovery can't reach.
+        self.scan_subnet = scan_subnet
 
     async def _refresh(self, device: KasaDevice) -> bool:
         """Pull live state. Returns False if the device couldn't be read.
@@ -146,6 +153,44 @@ class DeviceRegistry:
                     f"Device at {device.host} answered but could not be read "
                     "(bad credentials or offline)"
                 )
+        self._persist()
+        return found
+
+    async def discover_subnet(
+        self, subnet: str, *, concurrency: int = 50, timeout: int = 2
+    ) -> list[KasaDevice]:
+        """Unicast-probe every host in a CIDR subnet and cache the readable ones.
+
+        Broadcast discovery can't cross subnet/VLAN boundaries, so for devices on
+        an isolated network (e.g. an IoT VLAN) we sweep each address directly.
+        Raises ``ValueError`` if ``subnet`` is not a valid CIDR.
+        """
+        try:
+            network = ipaddress.ip_network(subnet, strict=False)
+        except ValueError as e:
+            raise ValueError(f"Invalid subnet {subnet!r}: {e}") from e
+
+        hosts = [str(h) for h in network.hosts()]
+        logger.info(f"Sweeping {subnet} ({len(hosts)} hosts)")
+        semaphore = asyncio.Semaphore(concurrency)
+        found: list[KasaDevice] = []
+
+        async def probe(host: str) -> None:
+            async with semaphore:
+                try:
+                    device = await Discover.discover_single(
+                        host,
+                        credentials=self._credentials,
+                        discovery_timeout=timeout,
+                    )
+                except Exception:  # noqa: BLE001 - most addresses have no device
+                    return
+                if await self._refresh(device):
+                    self._devices[device.host] = device
+                    found.append(device)
+
+        await asyncio.gather(*(probe(h) for h in hosts))
+        logger.info(f"Subnet sweep of {subnet} found {len(found)} devices")
         self._persist()
         return found
 
@@ -309,4 +354,8 @@ def _load_credentials() -> Credentials | None:
 # KASA_STATE_FILE (default ./data/known_devices.json); mount that path as a
 # volume to keep manually-added devices across container rebuilds.
 _STATE_FILE = Path(os.getenv("KASA_STATE_FILE", "data/known_devices.json"))
-registry = DeviceRegistry(HostStore(_STATE_FILE), _load_credentials())
+registry = DeviceRegistry(
+    HostStore(_STATE_FILE),
+    _load_credentials(),
+    scan_subnet=os.getenv("KASA_SCAN_SUBNET"),
+)

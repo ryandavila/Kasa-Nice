@@ -13,6 +13,8 @@ from .schemas import (
     Device,
     DiscoverRequest,
     PowerRequest,
+    ServerConfig,
+    SubnetScanRequest,
     Usage,
 )
 
@@ -22,6 +24,11 @@ router = APIRouter(prefix="/api")
 @router.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@router.get("/config", response_model=ServerConfig)
+async def config() -> ServerConfig:
+    return ServerConfig(scan_subnet=registry.scan_subnet)
 
 
 @router.get("/devices", response_model=list[Device])
@@ -42,6 +49,21 @@ async def discover(req: DiscoverRequest) -> list[Device]:
         if req.target
         else await registry.discover_all()
     )
+    return [serialize_device(d) for d in devices]
+
+
+@router.post("/discover/subnet", response_model=list[Device])
+async def discover_subnet(req: SubnetScanRequest) -> list[Device]:
+    subnet = req.subnet or registry.scan_subnet
+    if not subnet:
+        raise HTTPException(
+            status_code=422,
+            detail="No subnet provided and KASA_SCAN_SUBNET is not set.",
+        )
+    try:
+        devices = await registry.discover_subnet(subnet)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from None
     return [serialize_device(d) for d in devices]
 
 

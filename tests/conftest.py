@@ -110,3 +110,10 @@ class FakeDiscover:
         if target is None:
             return dict(self.broadcast)
         return dict(self.targets.get(target, {}))
+
+    async def discover_single(self, host, *, credentials=None, **kwargs) -> FakeDevice:
+        self.credentials = credentials
+        entry = self.targets.get(host)
+        if not entry:
+            raise TimeoutError(host)  # no device at this address
+        return next(iter(entry.values()))

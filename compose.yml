@@ -9,6 +9,12 @@ services:
     # On a Linux host, replace the `ports:` block above with host networking so
     # UDP broadcast discovery can reach devices on your LAN:
     #   network_mode: host
+    # TP-Link cloud credentials for newer SMART-protocol devices (e.g. KP125M)
+    # come from an untracked .env file, injected at runtime — never baked into
+    # the image. See .env.example. Legacy plugs work without them.
+    env_file:
+      - path: .env
+        required: false
     environment:
       - PYTHONUNBUFFERED=1
       - KASA_HOST=0.0.0.0

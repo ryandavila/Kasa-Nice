@@ -97,8 +97,12 @@ class FakeDiscover:
     def __init__(self):
         self.broadcast: dict[str, FakeDevice] = {}
         self.targets: dict[str, dict[str, FakeDevice]] = {}
+        self.credentials = None  # records the last value passed in
 
-    async def discover(self, target: str | None = None) -> dict[str, FakeDevice]:
+    async def discover(
+        self, target: str | None = None, credentials=None
+    ) -> dict[str, FakeDevice]:
+        self.credentials = credentials
         if target is None:
             return dict(self.broadcast)
         return dict(self.targets.get(target, {}))

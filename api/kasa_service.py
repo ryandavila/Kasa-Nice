@@ -10,8 +10,8 @@ from colorsys import hsv_to_rgb, rgb_to_hsv
 from pathlib import Path
 from typing import Any
 
+from kasa import Credentials, Discover, Module
 from kasa import Device as KasaDevice
-from kasa import Discover, Module
 
 from .device_store import HostStore
 from .logging_config import get_logger
@@ -59,9 +59,17 @@ class EnergyUnsupportedError(LookupError):
 class DeviceRegistry:
     """Holds the set of discovered devices and exposes control operations."""
 
-    def __init__(self, store: HostStore | None = None) -> None:
+    def __init__(
+        self,
+        store: HostStore | None = None,
+        credentials: Credentials | None = None,
+    ) -> None:
         self._devices: dict[str, KasaDevice] = {}
         self._store = store
+        # Passed to every Discover.discover() call. Newer SMART-protocol devices
+        # authenticate before discovery; None (no creds) leaves legacy plugs
+        # working and is equivalent to omitting the argument.
+        self._credentials = credentials
 
     async def _refresh(self, device: KasaDevice) -> None:
         try:
@@ -82,7 +90,9 @@ class DeviceRegistry:
     async def _probe_host(self, host: str) -> None:
         """Re-attach a single known host, tolerating failure (it may be offline)."""
         try:
-            response = await Discover.discover(target=host)
+            response = await Discover.discover(
+                target=host, credentials=self._credentials
+            )
         except Exception as e:  # noqa: BLE001 - offline known host shouldn't break startup
             logger.warning(f"Known host {host} did not respond: {e}")
             return
@@ -93,7 +103,7 @@ class DeviceRegistry:
     async def discover_all(self) -> list[KasaDevice]:
         """Broadcast-discover devices on the local network and cache them."""
         logger.info("Starting device discovery")
-        discovered = await Discover.discover()
+        discovered = await Discover.discover(credentials=self._credentials)
         for device in discovered.values():
             await self._refresh(device)
         self._devices = {d.host: d for d in discovered.values()}
@@ -110,7 +120,9 @@ class DeviceRegistry:
     async def discover_target(self, target: str) -> list[KasaDevice]:
         """Probe a single IP (or broadcast address) and merge results in."""
         logger.info(f"Discovering target {target}")
-        response = await Discover.discover(target=target)
+        response = await Discover.discover(
+            target=target, credentials=self._credentials
+        )
         for device in response.values():
             await self._refresh(device)
             self._devices[device.host] = device
@@ -256,8 +268,25 @@ def serialize_device(device: KasaDevice) -> Device:
     )
 
 
+def _load_credentials() -> Credentials | None:
+    """Build TP-Link cloud credentials from the environment, if provided.
+
+    Newer SMART-protocol devices require these to be discovered or controlled.
+    When unset, returns None so legacy plugs keep working without auth.
+    """
+    username = os.getenv("TPLINK_USERNAME")
+    password = os.getenv("TPLINK_PASSWORD")
+    if username and password:
+        return Credentials(username, password)
+    logger.warning(
+        "TPLINK_USERNAME/TPLINK_PASSWORD not set; only legacy (non-SMART) "
+        "devices will be reachable"
+    )
+    return None
+
+
 # Module-level singleton shared across requests. The host store lives at
 # KASA_STATE_FILE (default ./data/known_devices.json); mount that path as a
 # volume to keep manually-added devices across container rebuilds.
 _STATE_FILE = Path(os.getenv("KASA_STATE_FILE", "data/known_devices.json"))
-registry = DeviceRegistry(HostStore(_STATE_FILE))
+registry = DeviceRegistry(HostStore(_STATE_FILE), _load_credentials())

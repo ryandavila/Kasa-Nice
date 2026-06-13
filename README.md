@@ -70,6 +70,14 @@ All endpoints are under `/api`; interactive docs live at `http://localhost:8080/
 | `KASA_HOST` | `127.0.0.1` (`0.0.0.0` in Docker) | Bind address for the server |
 | `KASA_PORT` | `8080` | Server port |
 | `KASA_STATE_FILE` | `data/known_devices.json` | Where known device hosts are persisted |
+| `TPLINK_USERNAME` | _(unset)_ | TP-Link cloud email, required for newer SMART-protocol devices (e.g. KP125M) |
+| `TPLINK_PASSWORD` | _(unset)_ | TP-Link cloud password, paired with `TPLINK_USERNAME` |
+
+Newer Kasa devices use TP-Link's SMART protocol and authenticate before they
+can be discovered or controlled. Provide your TP-Link cloud credentials via a
+`.env` file (copy `.env.example` to `.env` and fill it in); Docker Compose reads
+it automatically. Without them, only legacy plugs are reachable. `.env` is
+gitignored — never commit real credentials.
 
 In Docker, `./logs` and `./data` are mounted as volumes so logs and the known
 device list survive rebuilds.

@@ -15,4 +15,7 @@ services:
       - KASA_PORT=8080
     volumes:
       - ./logs:/app/logs
+      # Persists known device hosts so manually-added (by-IP) devices survive
+      # restarts and rebuilds.
+      - ./data:/app/data
     restart: unless-stopped

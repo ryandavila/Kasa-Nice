@@ -5,12 +5,15 @@ This is the logic that previously lived inside the NiceGUI page handlers in
 """
 
 import asyncio
+import os
 from colorsys import hsv_to_rgb, rgb_to_hsv
+from pathlib import Path
 from typing import Any
 
 from kasa import Device as KasaDevice
 from kasa import Discover, Module
 
+from .device_store import HostStore
 from .logging_config import get_logger
 from .schemas import ChildPlug, Device, Hsv, Usage, UsageStat
 
@@ -56,14 +59,36 @@ class EnergyUnsupportedError(LookupError):
 class DeviceRegistry:
     """Holds the set of discovered devices and exposes control operations."""
 
-    def __init__(self) -> None:
+    def __init__(self, store: HostStore | None = None) -> None:
         self._devices: dict[str, KasaDevice] = {}
+        self._store = store
 
     async def _refresh(self, device: KasaDevice) -> None:
         try:
             await device.update()
         except Exception as e:  # noqa: BLE001 - one bad device shouldn't break the rest
             logger.error(f"Error updating device {device.host}: {e}")
+
+    def _persist(self) -> None:
+        """Save the union of known and currently-cached hosts.
+
+        Hosts aren't dropped when temporarily offline, so a plug that's
+        unplugged during a scan is still re-probed on the next startup.
+        """
+        if self._store is None:
+            return
+        self._store.save(self._store.load() | set(self._devices))
+
+    async def _probe_host(self, host: str) -> None:
+        """Re-attach a single known host, tolerating failure (it may be offline)."""
+        try:
+            response = await Discover.discover(target=host)
+        except Exception as e:  # noqa: BLE001 - offline known host shouldn't break startup
+            logger.warning(f"Known host {host} did not respond: {e}")
+            return
+        for device in response.values():
+            await self._refresh(device)
+            self._devices[device.host] = device
 
     async def discover_all(self) -> list[KasaDevice]:
         """Broadcast-discover devices on the local network and cache them."""
@@ -72,7 +97,14 @@ class DeviceRegistry:
         for device in discovered.values():
             await self._refresh(device)
         self._devices = {d.host: d for d in discovered.values()}
+
+        # Re-attach known hosts that broadcast discovery didn't reach.
+        if self._store is not None:
+            for host in self._store.load() - set(self._devices):
+                await self._probe_host(host)
+
         logger.info(f"Discovered {len(self._devices)} devices")
+        self._persist()
         return list(self._devices.values())
 
     async def discover_target(self, target: str) -> list[KasaDevice]:
@@ -82,6 +114,7 @@ class DeviceRegistry:
         for device in response.values():
             await self._refresh(device)
             self._devices[device.host] = device
+        self._persist()
         return list(response.values())
 
     async def refresh_all(self) -> list[KasaDevice]:
@@ -223,5 +256,8 @@ def serialize_device(device: KasaDevice) -> Device:
     )
 
 
-# Module-level singleton shared across requests.
-registry = DeviceRegistry()
+# Module-level singleton shared across requests. The host store lives at
+# KASA_STATE_FILE (default ./data/known_devices.json); mount that path as a
+# volume to keep manually-added devices across container rebuilds.
+_STATE_FILE = Path(os.getenv("KASA_STATE_FILE", "data/known_devices.json"))
+registry = DeviceRegistry(HostStore(_STATE_FILE))

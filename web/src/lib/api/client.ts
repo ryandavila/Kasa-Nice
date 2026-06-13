@@ -43,6 +43,9 @@ function post<T>(path: string, body?: unknown): Promise<T> {
 /** Devices discovered at startup / cached by the backend. */
 export const listDevices = () => request<Device[]>('/devices');
 
+/** Cached devices with live state re-read from the hardware; used for polling. */
+export const getState = () => request<Device[]>('/state');
+
 /** Trigger a fresh network discovery; pass a target IP to probe a single host. */
 export const discoverDevices = (target?: string) => post<Device[]>('/discover', { target });
 

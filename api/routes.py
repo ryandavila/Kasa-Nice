@@ -27,6 +27,12 @@ async def list_devices() -> list[Device]:
     return [serialize_device(d) for d in registry.all()]
 
 
+@router.get("/state", response_model=list[Device])
+async def state() -> list[Device]:
+    """Cached devices with live state refreshed from the hardware."""
+    return [serialize_device(d) for d in await registry.refresh_all()]
+
+
 @router.post("/discover", response_model=list[Device])
 async def discover(req: DiscoverRequest) -> list[Device]:
     devices = (

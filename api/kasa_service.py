@@ -4,6 +4,7 @@ This is the logic that previously lived inside the NiceGUI page handlers in
 ``main.py``, reshaped into a small service the REST routes can call.
 """
 
+import asyncio
 from colorsys import hsv_to_rgb, rgb_to_hsv
 from typing import Any
 
@@ -63,6 +64,15 @@ class DeviceRegistry:
             await self._refresh(device)
             self._devices[device.host] = device
         return list(response.values())
+
+    async def refresh_all(self) -> list[KasaDevice]:
+        """Re-read live state from cached devices (no network discovery).
+
+        Used by the frontend poll so the UI reflects changes made elsewhere
+        (e.g. the Kasa app or a physical switch).
+        """
+        await asyncio.gather(*(self._refresh(d) for d in self._devices.values()))
+        return list(self._devices.values())
 
     def all(self) -> list[KasaDevice]:
         return list(self._devices.values())

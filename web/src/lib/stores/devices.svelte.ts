@@ -1,5 +1,6 @@
 import {
 	listDevices,
+	getState,
 	discoverDevices,
 	setPower,
 	setBrightness,
@@ -26,6 +27,10 @@ class DeviceStore {
 	error = $state<string | null>(null);
 	/** Device ids with an in-flight request, for per-card busy state. */
 	busy = $state<Record<string, boolean>>({});
+	/** Whether the last background poll reached the hub. */
+	live = $state(true);
+
+	private pollTimer: ReturnType<typeof setInterval> | null = null;
 
 	get isEmpty() {
 		return this.status === 'ready' && this.devices.length === 0;
@@ -35,6 +40,28 @@ class DeviceStore {
 		const i = this.devices.findIndex((d) => d.id === updated.id);
 		if (i === -1) this.devices.push(updated);
 		else this.devices[i] = updated;
+	}
+
+	/**
+	 * Merge polled state into the current list in place, skipping devices with
+	 * an in-flight request so a background poll never clobbers optimistic state.
+	 */
+	private merge(fresh: Device[]) {
+		for (const f of fresh) {
+			if (this.busy[f.id]) continue;
+			const cur = this.devices.find((d) => d.id === f.id);
+			if (!cur) {
+				this.devices.push(f);
+				continue;
+			}
+			cur.is_on = f.is_on;
+			cur.brightness = f.brightness;
+			cur.hsv = f.hsv;
+			for (const fc of f.children) {
+				const cc = cur.children.find((c) => c.id === fc.id);
+				if (cc) cc.is_on = fc.is_on;
+			}
+		}
 	}
 
 	private async run(id: string, action: () => Promise<Device>, revert?: () => void) {
@@ -58,6 +85,31 @@ class DeviceStore {
 		} catch (e) {
 			this.error = message(e);
 			this.status = 'error';
+		}
+	}
+
+	/** Silently re-read live state from the hub; never disrupts the UI on failure. */
+	async refresh() {
+		try {
+			this.merge(await getState());
+			this.live = true;
+		} catch {
+			this.live = false; // next successful poll recovers
+		}
+	}
+
+	/** Begin polling live device state. Idempotent. */
+	startPolling(intervalMs = 5000) {
+		if (this.pollTimer) return;
+		this.pollTimer = setInterval(() => {
+			if (this.status === 'ready') this.refresh();
+		}, intervalMs);
+	}
+
+	stopPolling() {
+		if (this.pollTimer) {
+			clearInterval(this.pollTimer);
+			this.pollTimer = null;
 		}
 	}
 

@@ -35,6 +35,23 @@
 
 	onMount(() => {
 		deviceStore.load();
+		deviceStore.startPolling();
+
+		// Pause polling while the tab is hidden; resume with an immediate refresh.
+		const onVisibility = () => {
+			if (document.hidden) {
+				deviceStore.stopPolling();
+			} else {
+				deviceStore.refresh();
+				deviceStore.startPolling();
+			}
+		};
+		document.addEventListener('visibilitychange', onVisibility);
+
+		return () => {
+			document.removeEventListener('visibilitychange', onVisibility);
+			deviceStore.stopPolling();
+		};
 	});
 </script>
 
@@ -57,6 +74,22 @@
 		</button>
 
 		<div class="flex items-center gap-2">
+			{#if deviceStore.status === 'ready'}
+				<span
+					class="hidden items-center gap-1.5 px-1 text-xs font-medium text-faint sm:flex"
+					title={deviceStore.live
+						? 'Live — state updates automatically'
+						: 'Reconnecting to the hub'}
+				>
+					<span class="relative grid h-2 w-2 place-items-center" aria-hidden="true">
+						{#if deviceStore.live}
+							<span class="absolute h-2 w-2 animate-ping rounded-full bg-accent opacity-60"></span>
+						{/if}
+						<span class="h-2 w-2 rounded-full {deviceStore.live ? 'bg-accent' : 'bg-faint'}"></span>
+					</span>
+					{deviceStore.live ? 'Live' : 'Offline'}
+				</span>
+			{/if}
 			<button
 				type="button"
 				onclick={() => deviceStore.rediscover()}

@@ -31,3 +31,22 @@ export interface Device {
 	/** Individually controllable outlets, for power strips. */
 	children: ChildPlug[];
 }
+
+/** One bar in an energy chart — a day or a month. */
+export interface UsageStat {
+	label: string;
+	kwh: number;
+}
+
+export interface Usage {
+	device_id: string;
+	/** Instantaneous power draw in watts. */
+	current_power_w: number | null;
+	today_kwh: number | null;
+	month_kwh: number | null;
+	voltage: number | null;
+	/** Energy per day for the current month. */
+	daily: UsageStat[];
+	/** Energy per month for the current year. */
+	monthly: UsageStat[];
+}

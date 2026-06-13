@@ -12,9 +12,24 @@ from kasa import Device as KasaDevice
 from kasa import Discover, Module
 
 from .logging_config import get_logger
-from .schemas import ChildPlug, Device, Hsv
+from .schemas import ChildPlug, Device, Hsv, Usage, UsageStat
 
 logger = get_logger(__name__)
+
+_MONTHS = (
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
+)
 
 
 def hex_to_hsv(hex_color: str) -> Hsv:
@@ -32,6 +47,10 @@ def hsv_to_hex(hsv: Hsv) -> str:
 
 class DeviceNotFoundError(KeyError):
     """Raised when a device or child id is not in the registry."""
+
+
+class EnergyUnsupportedError(LookupError):
+    """Raised when a device has no energy-monitoring (emeter) module."""
 
 
 class DeviceRegistry:
@@ -108,6 +127,54 @@ class DeviceRegistry:
         await self._refresh(device)
         return device
 
+    async def get_usage(self, device_id: str) -> Usage:
+        """Energy-monitoring data for a device: live power plus history."""
+        device = self.get(device_id)
+        energy = device.modules.get(Module.Energy)
+        if energy is None:
+            raise EnergyUnsupportedError(device_id)
+        await self._refresh(device)
+
+        def _safe(name: str) -> float | None:
+            try:
+                value = getattr(energy, name)
+            except Exception:  # noqa: BLE001 - missing reading shouldn't 500
+                return None
+            return float(value) if value is not None else None
+
+        daily_raw: dict[int, float] = {}
+        monthly_raw: dict[int, float] = {}
+        try:
+            daily_raw = await energy.get_daily_stats(kwh=True)
+        except Exception as e:  # noqa: BLE001
+            logger.error(f"Daily stats for {device.host} failed: {e}")
+        try:
+            monthly_raw = await energy.get_monthly_stats(kwh=True)
+        except Exception as e:  # noqa: BLE001
+            logger.error(f"Monthly stats for {device.host} failed: {e}")
+
+        daily = [
+            UsageStat(label=str(day), kwh=round(kwh, 3))
+            for day, kwh in sorted(daily_raw.items())
+        ]
+        monthly = [
+            UsageStat(
+                label=_MONTHS[month - 1] if 1 <= month <= 12 else str(month),
+                kwh=round(kwh, 3),
+            )
+            for month, kwh in sorted(monthly_raw.items())
+        ]
+
+        return Usage(
+            device_id=device.host,
+            current_power_w=_safe("current_consumption"),
+            today_kwh=_safe("consumption_today"),
+            month_kwh=_safe("consumption_this_month"),
+            voltage=_safe("voltage"),
+            daily=daily,
+            monthly=monthly,
+        )
+
     async def set_child_power(
         self, device_id: str, child_id: str, on: bool
     ) -> KasaDevice:
@@ -149,7 +216,7 @@ def serialize_device(device: KasaDevice) -> Device:
         is_on=device.is_on,
         is_color=is_color,
         is_dimmable=is_dimmable,
-        has_emeter=bool(getattr(device, "has_emeter", False)),
+        has_emeter=device.modules.get(Module.Energy) is not None,
         brightness=brightness,
         hsv=hsv,
         children=children,

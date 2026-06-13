@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException
 
 from .kasa_service import (
     DeviceNotFoundError,
+    EnergyUnsupportedError,
     hex_to_hsv,
     registry,
     serialize_device,
@@ -12,6 +13,7 @@ from .schemas import (
     Device,
     DiscoverRequest,
     PowerRequest,
+    Usage,
 )
 
 router = APIRouter(prefix="/api")
@@ -41,6 +43,20 @@ async def discover(req: DiscoverRequest) -> list[Device]:
         else await registry.discover_all()
     )
     return [serialize_device(d) for d in devices]
+
+
+@router.get("/devices/{device_id}/usage", response_model=Usage)
+async def usage(device_id: str) -> Usage:
+    try:
+        return await registry.get_usage(device_id)
+    except DeviceNotFoundError:
+        raise HTTPException(
+            status_code=404, detail=f"Unknown device: {device_id}"
+        ) from None
+    except EnergyUnsupportedError:
+        raise HTTPException(
+            status_code=404, detail=f"Device has no energy monitoring: {device_id}"
+        ) from None
 
 
 @router.post("/devices/{device_id}/power", response_model=Device)

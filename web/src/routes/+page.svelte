@@ -5,9 +5,10 @@
 	import Icon from '$lib/components/Icon.svelte';
 	import DeviceCard from '$lib/components/DeviceCard.svelte';
 	import DiscoveryPanel from '$lib/components/DiscoveryPanel.svelte';
+	import EnergyPanel from '$lib/components/EnergyPanel.svelte';
 	import ThemeToggle from '$lib/components/ThemeToggle.svelte';
 
-	type Tab = 'devices' | 'discovery';
+	type Tab = 'devices' | 'energy' | 'discovery';
 	let tab = $state<Tab>('devices');
 
 	const LABELS: Record<DeviceType, string> = {
@@ -105,7 +106,7 @@
 
 	<!-- ── Tabs ───────────────────────────────────────────────────────────── -->
 	<nav class="mb-8 inline-flex rounded-full border border-line bg-surface/70 p-1">
-		{#each [{ id: 'devices', label: 'Devices' }, { id: 'discovery', label: 'Discovery' }] as t (t.id)}
+		{#each [{ id: 'devices', label: 'Devices' }, { id: 'energy', label: 'Energy' }, { id: 'discovery', label: 'Discovery' }] as t (t.id)}
 			<button
 				type="button"
 				onclick={() => (tab = t.id as Tab)}
@@ -188,6 +189,8 @@
 				{/each}
 			</div>
 		{/if}
+	{:else if tab === 'energy'}
+		<EnergyPanel />
 	{:else}
 		<DiscoveryPanel />
 	{/if}

@@ -1,4 +1,4 @@
-import type { Device, Hsv } from './types';
+import type { Device, Hsv, Usage } from './types';
 
 /**
  * Thin client for the Kasa-Nice FastAPI backend. Paths are relative so the same
@@ -60,6 +60,9 @@ export const setColorHex = (id: string, hex: string) =>
 
 export const setColorHsv = (id: string, hsv: Hsv) =>
 	post<Device>(`/devices/${encodeURIComponent(id)}/color`, { hsv });
+
+/** Energy-monitoring data (live power + daily/monthly history) for a device. */
+export const getUsage = (id: string) => request<Usage>(`/devices/${encodeURIComponent(id)}/usage`);
 
 export const setChildPower = (id: string, childId: string, on: boolean) =>
 	post<Device>(`/devices/${encodeURIComponent(id)}/children/${encodeURIComponent(childId)}/power`, {

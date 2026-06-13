@@ -13,6 +13,7 @@
 		| 'moon'
 		| 'droplet'
 		| 'bolt'
+		| 'chart'
 		| 'search';
 
 	// 24×24 stroke icons. Each entry is the inner markup of an <svg>.
@@ -35,6 +36,7 @@
 		moon: '<path d="M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5Z"/>',
 		droplet: '<path d="M12 3.5s6 6.3 6 10.5a6 6 0 0 1-12 0c0-4.2 6-10.5 6-10.5Z"/>',
 		bolt: '<path d="M13 2 4 14h7l-1 8 9-12h-7l1-8Z"/>',
+		chart: '<path d="M4 20V4m16 16H4m4-2V11m5 7V7m5 11v-5"/>',
 		search: '<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>'
 	};
 

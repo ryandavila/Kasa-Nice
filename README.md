@@ -1,224 +1,194 @@
 # Kasa-Nice
 
-A modern, containerized desktop GUI application for controlling TP-Link Kasa smart home devices in your local network.
+A modern, containerized web app for controlling TP-Link Kasa smart home devices
+on your local network — no cloud account required.
 
-Built with Python using the [python-kasa](https://github.com/python-kasa/python-kasa) library and [NiceGUI](https://github.com/zauberzeug/nicegui) framework.
-
-![kasa-nice screenshot](Kasa_GUI_Screenshot.png?raw=True)
+A **FastAPI** backend ([`api/`](api/)) talks to your devices via
+[python-kasa](https://github.com/python-kasa/python-kasa) and serves a
+**SvelteKit** single-page frontend ([`web/`](web/)) that polls for live state.
 
 ## Features
 
-- 🏠 **Local Network Control**: Discover and control Kasa devices on your local network (no cloud required)
-- 🎨 **Modern Web UI**: Clean, responsive interface accessible via web browser
-- 🐳 **Docker Support**: Easy deployment with Docker and Docker Compose
-- 📊 **Usage Monitoring**: View energy consumption charts for compatible devices
-- 🔧 **Device Management**: Control switches, dimmers, color bulbs, and light strips
-- 📱 **Cross-Platform**: Works on Windows, macOS, and Linux
-- 📝 **Structured Logging**: Comprehensive logging with rotation
+- 🏠 **Local control** — discover and control Kasa devices on your LAN, no cloud
+- ⚡ **Live state** — the UI polls device state, so changes made elsewhere (the
+  Kasa app, a physical switch) show up automatically
+- 🔧 **Full device support** — toggle plugs, dim, set bulb color, and control
+  individual outlets on power strips
+- 📊 **Energy monitoring** — live power draw plus daily/monthly usage charts for
+  devices with an energy meter
+- 🔌 **Persistent discovery** — devices added by IP survive restarts
+- 🌗 **Light/dark theme** with an instant, no-flash toggle
+- 🐳 **Docker-ready** — one multi-stage image builds the frontend and serves it
+  from the API on a single port
 
 ## Quick Start
 
-### Option 1: Docker (Recommended)
+### Docker (recommended)
 
 ```bash
-# Clone the repository
 git clone https://github.com/ryandavila/Kasa-Nice.git
 cd Kasa-Nice
-
-# Run with Docker Compose
 docker compose up -d
-
-# Access the web interface at http://localhost:8080
+# open http://localhost:8080
 ```
 
-### Option 2: uv Installation (Recommended for Python)
+> **Discovery & networking:** the default bridge network can't carry UDP
+> broadcast, so auto-discovery may find nothing in Docker. Either add devices by
+> IP in the **Discovery** tab, or — on a Linux host — switch to host networking
+> (see the commented `network_mode: host` in [`compose.yml`](compose.yml)).
+> Host networking is Linux-only; on Docker Desktop (macOS/Windows) broadcast
+> won't cross the VM boundary, so run outside Docker or add devices by IP.
+
+### Local (without Docker)
 
 ```bash
-# Clone the repository
 git clone https://github.com/ryandavila/Kasa-Nice.git
 cd Kasa-Nice
-
-# Install dependencies with uv (much faster than pip)
 uv sync
-
-# Run the application
-uv run python main.py
+make run          # builds the frontend, then serves it from the API at :8080
 ```
 
-## Project Structure
+## API
 
-The project is being migrated from a single NiceGUI app to a FastAPI backend
-(`api/`) that serves a SvelteKit frontend (`web/`).
+All endpoints are under `/api`; interactive docs live at `http://localhost:8080/docs`.
 
-```
-├── api/                 # FastAPI backend (REST API + serves the built frontend)
-│   ├── main.py          # App factory, lifespan discovery, static serving, entry point
-│   ├── routes.py        # REST endpoints under /api
-│   ├── kasa_service.py  # Device discovery & control (decoupled from any UI)
-│   ├── schemas.py       # Pydantic request/response models
-│   └── logging_config.py
-├── web/                 # SvelteKit frontend (Svelte 5, Tailwind, bun)
-│   └── src/lib/api/     # Typed client + models matching the backend
-├── main.py              # Legacy NiceGUI app (kept during migration)
-├── usage.py             # Legacy usage monitoring/plotting
-├── static/              # Static assets (images, etc.)
-├── pyproject.toml       # Python project configuration
-├── Dockerfile           # Multi-stage build: bun builds web, Python serves it
-└── compose.yml          # Docker Compose
-```
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET`  | `/api/devices` | Cached device list |
+| `GET`  | `/api/state` | Device list with live state re-read from hardware (polled) |
+| `POST` | `/api/discover` | Discover devices (`{"target": "ip"}` to probe one host) |
+| `POST` | `/api/devices/{id}/power` | `{"on": true\|false}` |
+| `POST` | `/api/devices/{id}/brightness` | `{"value": 0-100}` |
+| `POST` | `/api/devices/{id}/color` | `{"hex": "#rrggbb"}` or `{"hsv": [h,s,v]}` |
+| `POST` | `/api/devices/{id}/children/{child}/power` | Toggle one outlet on a strip |
+| `GET`  | `/api/devices/{id}/usage` | Energy data (live power + daily/monthly history) |
 
 ## Configuration
 
-### Environment Variables
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `KASA_HOST` | `127.0.0.1` (`0.0.0.0` in Docker) | Bind address for the server |
+| `KASA_PORT` | `8080` | Server port |
+| `KASA_STATE_FILE` | `data/known_devices.json` | Where known device hosts are persisted |
 
-- `KASA_HOST`: Host to bind the web server (default: `127.0.0.1`)
-- `KASA_PORT`: Port for the web server (default: `8080`)
+In Docker, `./logs` and `./data` are mounted as volumes so logs and the known
+device list survive rebuilds.
 
-### Docker Environment
+## Project Structure
 
-When running with Docker, the application uses `host` networking mode to discover devices on your local network. Logs are persisted to the `./logs` directory.
-
-## Usage
-
-1. **Device Discovery**: The application automatically discovers Kasa devices on your network
-2. **Manual Discovery**: Use the Discovery tab to search for specific devices by IP address
-3. **Device Control**:
-   - Toggle devices on/off
-   - Adjust brightness for dimmable devices
-   - Change colors for color-capable bulbs
-   - Set effects for light strips
-4. **Usage Monitoring**: View energy consumption data in the Usage tab (for devices with energy monitoring)
-
-## Supported Devices
-
-All devices supported by the python-kasa library:
-
-### Plugs
-
-- HS100, HS103, HS105, HS107, HS110
-- KP105, KP115, KP125, KP401
-- EP10
-
-### Power Strips
-
-- EP40, HS300, KP303
-- KP200 (in wall), KP400, KP405 (dimmer)
-
-### Wall Switches
-
-- ES20M, HS200, HS210, HS220
-- KS200M, KS220M, KS230
-
-### Bulbs
-
-- LB100, LB110, LB120, LB130, LB230
-- KL50, KL60, KL110, KL120, KL125, KL130, KL135
-
-### Light Strips
-
-- KL400, KL420, KL430
+```
+├── api/                  # FastAPI backend
+│   ├── main.py           # App factory, lifespan discovery, SPA serving, entry point
+│   ├── routes.py         # REST endpoints under /api
+│   ├── kasa_service.py   # Device discovery & control (decoupled from any UI)
+│   ├── device_store.py   # Persists known device hosts
+│   ├── schemas.py        # Pydantic request/response models
+│   └── logging_config.py
+├── web/                  # SvelteKit frontend (Svelte 5, Tailwind v4, bun)
+│   └── src/lib/          # Components, runes stores, and the typed API client
+├── tests/                # pytest suite (python-kasa is faked; no devices needed)
+├── pyproject.toml        # Python project + tooling config
+├── Dockerfile            # Multi-stage: bun builds web/, Python serves it
+└── compose.yml           # Docker Compose
+```
 
 ## Development
 
 ### Prerequisites
 
 - Python 3.14+
-- [uv](https://docs.astral.sh/uv/) (recommended for fast dependency management)
-- [bun](https://bun.sh/) (for the frontend)
+- [uv](https://docs.astral.sh/uv/) (Python dependency management)
+- [bun](https://bun.sh/) (frontend)
 - Docker (optional)
 
-### Local Development
+### Local development
 
-Run the backend and frontend in two terminals. The Vite dev server proxies
-`/api` calls to the backend, so the frontend always fetches relative paths.
-
-```bash
-# One-time setup (Python + frontend deps)
-make setup
-
-# Terminal 1 — FastAPI backend with autoreload (http://localhost:8080)
-make api-dev
-
-# Terminal 2 — SvelteKit dev server (http://localhost:5173)
-make web-dev
-```
-
-To run a production-style build where the backend serves the compiled frontend
-on a single port:
+The Vite dev server proxies `/api` to the backend, so the frontend always
+fetches relative paths in both dev and production.
 
 ```bash
-make run   # builds web/ then serves it from the API at http://localhost:8080
+make setup     # one-time: install Python + frontend deps
+
+make api-dev   # Terminal 1 — FastAPI with autoreload (http://localhost:8080)
+make web-dev   # Terminal 2 — SvelteKit dev server (http://localhost:5173)
 ```
 
-The interactive API docs are available at `http://localhost:8080/docs`.
+### Quality checks
+
+```bash
+make test         # backend tests (pytest)
+make lint         # ruff (Python)
+make web-lint     # prettier + eslint (frontend)
+make check        # svelte-check (types + a11y)
+```
+
+## Testing
+
+The backend has a pytest suite that fakes `python-kasa`, so it runs with no real
+devices or network: color helpers, serialization, energy data, host
+persistence, and every REST route (including error paths).
+
+```bash
+make test     # or: uv run pytest
+```
+
+## Supported Devices
+
+All devices supported by python-kasa, including:
+
+- **Plugs:** HS100/103/105/107/110, KP105/115/125/401, EP10
+- **Power strips:** EP40, HS300, KP303, KP200, KP400, KP405
+- **Wall switches:** ES20M, HS200/210/220, KS200M/220M/230
+- **Bulbs:** LB100/110/120/130/230, KL50/60/110/120/125/130/135
+- **Light strips:** KL400/420/430
 
 ## Logging
 
-The application includes structured logging with:
-
-- Console output for real-time monitoring
-- File-based logging with rotation (10MB max, 5 backups)
-- Logs stored in `./logs/kasa_nice.log`
+Structured logging to the console and to `./logs/kasa_nice.log`, with rotation
+(10 MB max, 5 backups).
 
 ## Troubleshooting
 
-### Device Discovery Issues
+**No devices found**
+- Confirm devices are powered on and on the same network segment as the host.
+- In Docker (bridge mode), broadcast discovery won't work — add devices by IP in
+  the Discovery tab, or use host networking on Linux.
+- Verify with python-kasa directly: `docker compose exec kasa-nice uv run kasa discover`.
 
-- Ensure your devices are on the same network segment
-- Try manual discovery using the device's IP address
-- Check that devices are powered on and connected to WiFi
-
-### Docker Network Issues
-
-- The application uses `host` networking mode for device discovery
-- Ensure Docker has access to your local network
-- On some systems, you may need to adjust firewall settings
-
-### Permission Issues
-
-- Ensure the logs directory is writable
-- On Linux/macOS, you may need to adjust file permissions
+**Permission issues**
+- Ensure `./logs` and `./data` are writable by the container/user.
 
 ## Contributing
 
 1. Fork the repository
 2. Create a feature branch
-3. Make your changes
-4. Add tests if applicable
+3. Make your changes and add tests where applicable
+4. Run `make test`, `make lint`, and `make web-lint`
 5. Submit a pull request
 
 ## License
 
-This project is licensed under the terms specified in the LICENSE file.
+This project is licensed under the terms specified in the [LICENSE](LICENSE) file.
 
 ## Credits
 
-This project is a fork and modernization of the original [Kasa-Nice](https://github.com/uni-byte/Kasa-Nice) by [uni-byte](https://github.com/uni-byte). The original project provided the foundation and core functionality for controlling TP-Link Kasa devices through a web interface.
+This project is a fork and modernization of the original
+[Kasa-Nice](https://github.com/uni-byte/Kasa-Nice) by
+[uni-byte](https://github.com/uni-byte), which provided the foundation for
+controlling TP-Link Kasa devices through a web interface.
 
-### Original Author
-
-- **uni-byte** - Original creator and maintainer of Kasa-Nice
-
-### Fork Enhancements
-
-This fork includes various improvements:
-
-- Modern Python packaging with `pyproject.toml`
-- uv-based dependency management
-- Simplified file structure for Docker webapp deployment
-- Enhanced code quality with ruff linting and formatting
-- Docker containerization improvements
-- Updated dependencies and Python 3.14 support
+This fork has since been rebuilt as a FastAPI + SvelteKit application
+(replacing the original NiceGUI UI) with live state polling, native energy
+charts, persistent discovery, modern Python packaging, uv-based dependency
+management, a pytest suite, and Docker improvements.
 
 ## Acknowledgments
 
-- [python-kasa](https://github.com/python-kasa/python-kasa) - TP-Link Kasa device control
-- [NiceGUI](https://github.com/zauberzeug/nicegui) - Modern web UI framework
-- [Plotly](https://plotly.com/) - Interactive charts and graphs
+- [python-kasa](https://github.com/python-kasa/python-kasa) — TP-Link Kasa device control
+- [FastAPI](https://fastapi.tiangolo.com/) — backend framework
+- [SvelteKit](https://svelte.dev/) + [Tailwind CSS](https://tailwindcss.com/) — frontend
 
 ## Links
 
 - [GitHub Repository](https://github.com/ryandavila/Kasa-Nice)
-- [NiceGUI Documentation](https://nicegui.io/)
-- [Python-Kasa Documentation](https://python-kasa.readthedocs.io/)
-
+- [python-kasa Documentation](https://python-kasa.readthedocs.io/)

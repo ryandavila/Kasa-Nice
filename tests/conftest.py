@@ -66,8 +66,10 @@ class FakeDevice:
         is_dimmable: bool = False,
         has_energy: bool = False,
         children: list[FakeChild] | None = None,
+        fail_update: bool = False,
     ):
         self.host = host
+        self._fail_update = fail_update
         self.alias = alias
         self.model = model
         self.device_type = FakeDeviceType(type_name)
@@ -82,6 +84,8 @@ class FakeDevice:
         self.update_count = 0
 
     async def update(self) -> None:
+        if self._fail_update:
+            raise RuntimeError("simulated update failure (auth/offline)")
         self.update_count += 1
 
     async def turn_on(self) -> None:

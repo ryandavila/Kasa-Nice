@@ -71,11 +71,19 @@ class DeviceRegistry:
         # working and is equivalent to omitting the argument.
         self._credentials = credentials
 
-    async def _refresh(self, device: KasaDevice) -> None:
+    async def _refresh(self, device: KasaDevice) -> bool:
+        """Pull live state. Returns False if the device couldn't be read.
+
+        An un-readable device (bad credentials, offline) has no usable data, so
+        callers skip caching it — otherwise serializing it later would raise and
+        take down the whole device list.
+        """
         try:
             await device.update()
+            return True
         except Exception as e:  # noqa: BLE001 - one bad device shouldn't break the rest
             logger.error(f"Error updating device {device.host}: {e}")
+            return False
 
     def _persist(self) -> None:
         """Save the union of known and currently-cached hosts.
@@ -97,16 +105,21 @@ class DeviceRegistry:
             logger.warning(f"Known host {host} did not respond: {e}")
             return
         for device in response.values():
-            await self._refresh(device)
-            self._devices[device.host] = device
+            if await self._refresh(device):
+                self._devices[device.host] = device
+            else:
+                logger.warning(
+                    f"Known host {device.host} answered but could not be read "
+                    "(bad credentials or offline); not serving it"
+                )
 
     async def discover_all(self) -> list[KasaDevice]:
         """Broadcast-discover devices on the local network and cache them."""
         logger.info("Starting device discovery")
         discovered = await Discover.discover(credentials=self._credentials)
-        for device in discovered.values():
-            await self._refresh(device)
-        self._devices = {d.host: d for d in discovered.values()}
+        self._devices = {
+            d.host: d for d in discovered.values() if await self._refresh(d)
+        }
 
         # Re-attach known hosts that broadcast discovery didn't reach.
         if self._store is not None:
@@ -123,11 +136,18 @@ class DeviceRegistry:
         response = await Discover.discover(
             target=target, credentials=self._credentials
         )
+        found: list[KasaDevice] = []
         for device in response.values():
-            await self._refresh(device)
-            self._devices[device.host] = device
+            if await self._refresh(device):
+                self._devices[device.host] = device
+                found.append(device)
+            else:
+                logger.warning(
+                    f"Device at {device.host} answered but could not be read "
+                    "(bad credentials or offline)"
+                )
         self._persist()
-        return list(response.values())
+        return found
 
     async def refresh_all(self) -> list[KasaDevice]:
         """Re-read live state from cached devices (no network discovery).

@@ -131,3 +131,34 @@ def test_offline_known_host_is_not_forgotten(tmp_path, fake_discover):
 
     assert "10.0.0.9" not in reg._devices  # couldn't reach it now
     assert store.load() == {"10.0.0.9"}  # but still remembered for next time
+
+
+# ── resilience: an un-readable device must not break the list ────────────────
+
+
+def test_unreadable_target_is_not_served(tmp_path, fake_discover):
+    # A device answers discovery but can't be read (e.g. wrong credentials).
+    fake_discover.targets["10.0.0.5"] = {
+        "10.0.0.5": FakeDevice("10.0.0.5", fail_update=True)
+    }
+    reg = DeviceRegistry(HostStore(tmp_path / "hosts.json"))
+
+    found = asyncio.run(reg.discover_target("10.0.0.5"))
+
+    assert found == []  # not returned to the caller
+    assert "10.0.0.5" not in reg._devices  # and never cached/served
+
+
+def test_one_unreadable_device_does_not_drop_the_others(fake_discover):
+    # Reproduces the 500: a device that raises on update() would also raise on
+    # serialize_device(); it must be excluded so the rest still render.
+    fake_discover.broadcast = {
+        "10.0.0.1": FakeDevice("10.0.0.1", alias="Good"),
+        "10.0.0.2": FakeDevice("10.0.0.2", alias="Bad", fail_update=True),
+    }
+    reg = DeviceRegistry()
+
+    asyncio.run(reg.discover_all())
+
+    assert set(reg._devices) == {"10.0.0.1"}
+    assert [serialize_device(d).alias for d in reg.all()] == ["Good"]

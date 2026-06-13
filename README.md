@@ -47,13 +47,24 @@ uv run python main.py
 
 ## Project Structure
 
+The project is being migrated from a single NiceGUI app to a FastAPI backend
+(`api/`) that serves a SvelteKit frontend (`web/`).
+
 ```
-├── main.py              # Main application entry point (was kasa_main_GUI.py)
-├── usage.py             # Usage monitoring and plotting (was kasa_nice_usage.py)
-├── logging_config.py    # Logging configuration
+├── api/                 # FastAPI backend (REST API + serves the built frontend)
+│   ├── main.py          # App factory, lifespan discovery, static serving, entry point
+│   ├── routes.py        # REST endpoints under /api
+│   ├── kasa_service.py  # Device discovery & control (decoupled from any UI)
+│   ├── schemas.py       # Pydantic request/response models
+│   └── logging_config.py
+├── web/                 # SvelteKit frontend (Svelte 5, Tailwind, bun)
+│   └── src/lib/api/     # Typed client + models matching the backend
+├── main.py              # Legacy NiceGUI app (kept during migration)
+├── usage.py             # Legacy usage monitoring/plotting
 ├── static/              # Static assets (images, etc.)
 ├── pyproject.toml       # Python project configuration
-└── Dockerfile          # Docker containerization
+├── Dockerfile           # Multi-stage build: bun builds web, Python serves it
+└── compose.yml          # Docker Compose
 ```
 
 ## Configuration
@@ -113,17 +124,33 @@ All devices supported by the python-kasa library:
 
 - Python 3.14+
 - [uv](https://docs.astral.sh/uv/) (recommended for fast dependency management)
+- [bun](https://bun.sh/) (for the frontend)
 - Docker (optional)
 
 ### Local Development
 
-```bash
-# Install dependencies with uv (recommended)
-uv sync --dev
+Run the backend and frontend in two terminals. The Vite dev server proxies
+`/api` calls to the backend, so the frontend always fetches relative paths.
 
-# Run in development mode
-uv run python main.py
+```bash
+# One-time setup (Python + frontend deps)
+make setup
+
+# Terminal 1 — FastAPI backend with autoreload (http://localhost:8080)
+make api-dev
+
+# Terminal 2 — SvelteKit dev server (http://localhost:5173)
+make web-dev
 ```
+
+To run a production-style build where the backend serves the compiled frontend
+on a single port:
+
+```bash
+make run   # builds web/ then serves it from the API at http://localhost:8080
+```
+
+The interactive API docs are available at `http://localhost:8080/docs`.
 
 ## Logging
 

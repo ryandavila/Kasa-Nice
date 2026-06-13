@@ -15,3 +15,12 @@ Dockerfile
 compose.yml
 requirements.txt
 .uv-cache
+.venv
+
+# Frontend (deps and build output are produced inside the image)
+web/node_modules
+web/build
+web/.svelte-kit
+
+# Runtime
+logs

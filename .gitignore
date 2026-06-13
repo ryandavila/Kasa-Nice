@@ -172,3 +172,8 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# Frontend: the unanchored Python `lib/` rule above would otherwise hide the
+# SvelteKit source library, so re-include it. node_modules and build output are
+# covered by web/.gitignore.
+!web/src/lib/

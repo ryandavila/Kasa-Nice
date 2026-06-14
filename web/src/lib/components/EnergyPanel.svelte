@@ -68,6 +68,13 @@
 	</div>
 {:else}
 	<div class="space-y-6">
+		{#if energyRate != null}
+			<p class="text-xs text-muted">
+				Cost estimated at
+				<span class="font-mono text-accent-ink">{currency}{energyRate}/kWh</span>
+				— flat rate, excludes tiered/time-of-use pricing, fees, and taxes.
+			</p>
+		{/if}
 		{#each meters as device (device.id)}
 			{@const u = usage[device.id]}
 			<section class="rounded-card border border-line bg-surface/70 p-5 sm:p-6">
@@ -108,7 +115,9 @@
 									{s.v}<span class="ml-1 text-xs font-normal text-muted">{s.unit}</span>
 								</dd>
 								{#if energyRate != null && s.cost != null}
-									<dd class="mt-0.5 font-mono text-xs text-muted">{fmtMoney(s.cost)}</dd>
+									<dd class="mt-1 font-display text-base font-semibold text-accent-ink">
+										≈{fmtMoney(s.cost)}
+									</dd>
 								{/if}
 							</div>
 						{/each}

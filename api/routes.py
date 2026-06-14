@@ -44,12 +44,16 @@ async def state() -> list[Device]:
 
 @router.post("/discover", response_model=list[Device])
 async def discover(req: DiscoverRequest) -> list[Device]:
-    devices = (
-        await registry.discover_target(req.target)
-        if req.target
-        else await registry.discover_all()
-    )
-    return [serialize_device(d) for d in devices]
+    if req.target:
+        devices = await registry.discover_target(req.target)
+        return [serialize_device(d) for d in devices]
+    # Broadcast re-discovery from the UI's "Discover" button: refresh cloud-only
+    # devices too (e.g. an HS300 strip onboarded after startup), so they appear
+    # without a server restart. attach_cloud() is a no-op when the cloud fallback
+    # is disabled, and returning registry.all() includes the attached devices.
+    await registry.discover_all()
+    await registry.attach_cloud()
+    return [serialize_device(d) for d in registry.all()]
 
 
 @router.post("/discover/subnet", response_model=list[Device])

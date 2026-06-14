@@ -13,6 +13,7 @@ from typing import Any
 
 from kasa import Credentials, Discover, Module
 from kasa import Device as KasaDevice
+from kasa.exceptions import AuthenticationError
 
 from .cloud_service import (
     KasaCloudClient,
@@ -107,6 +108,12 @@ class DeviceRegistry:
         try:
             await device.update()
             return True
+        except AuthenticationError as e:
+            # Expected for devices that dropped local auth (e.g. HS300 strips):
+            # the discovery caller logs a contextual warning, and they're handled
+            # via the cloud fallback (or its hint), so this isn't a hard error.
+            logger.debug(f"Local auth failed for {device.host}: {e}")
+            return False
         except Exception as e:  # noqa: BLE001 - one bad device shouldn't break the rest
             logger.error(f"Error updating device {device.host}: {e}")
             return False

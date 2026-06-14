@@ -143,6 +143,36 @@ def test_known_host_reattached_on_startup(tmp_path, fake_discover):
     assert "10.0.0.5" in reg._devices
 
 
+def test_run_startup_discovery_toggles_discovering_flag(fake_discover):
+    fake_discover.broadcast = {"10.0.0.1": FakeDevice("10.0.0.1")}
+    reg = DeviceRegistry()
+    seen = {}
+    original = reg.discover_all
+
+    async def spy():
+        seen["during"] = reg.discovering  # flag must be set while sweeping
+        return await original()
+
+    reg.discover_all = spy
+    asyncio.run(reg.run_startup_discovery())
+
+    assert seen["during"] is True
+    assert reg.discovering is False  # cleared when done
+    assert "10.0.0.1" in reg._devices
+
+
+def test_run_startup_discovery_never_raises_and_clears_flag():
+    reg = DeviceRegistry()
+
+    async def boom():
+        raise RuntimeError("network down")
+
+    reg.discover_all = boom
+    asyncio.run(reg.run_startup_discovery())  # must not propagate
+
+    assert reg.discovering is False
+
+
 def test_offline_known_host_is_not_forgotten(tmp_path, fake_discover):
     store = HostStore(tmp_path / "hosts.json")
     store.save({"10.0.0.9"})

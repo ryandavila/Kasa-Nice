@@ -40,6 +40,14 @@ export interface UsageStat {
 	cost: number | null;
 }
 
+/** Live server state the UI polls to reflect background work. */
+export interface ServerStatus {
+	/** True while the initial network sweep is still running. */
+	discovering: boolean;
+	/** Devices currently known to the server. */
+	device_count: number;
+}
+
 /** Server-side configuration the UI needs (e.g. the default subnet to sweep). */
 export interface ServerConfig {
 	/** CIDR the server sweeps by unicast, or null if unconfigured. */

@@ -14,6 +14,7 @@ from .schemas import (
     DiscoverRequest,
     PowerRequest,
     ServerConfig,
+    ServerStatus,
     SubnetScanRequest,
     Usage,
 )
@@ -32,6 +33,14 @@ async def config() -> ServerConfig:
         scan_subnet=registry.scan_subnet,
         energy_rate=registry.energy_rate,
         energy_currency=registry.energy_currency,
+    )
+
+
+@router.get("/status", response_model=ServerStatus)
+async def status() -> ServerStatus:
+    """Lightweight poll target: is the startup sweep still running?"""
+    return ServerStatus(
+        discovering=registry.discovering, device_count=len(registry.all())
     )
 
 

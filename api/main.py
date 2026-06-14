@@ -1,3 +1,5 @@
+import asyncio
+import contextlib
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -21,17 +23,15 @@ WEB_BUILD_DIR = Path(__file__).resolve().parent.parent / "web" / "build"
 async def lifespan(app: FastAPI):
     setup_logging()
     logger.info("Starting Kasa-Nice API")
-    try:
-        await registry.discover_all()
-        if registry.scan_subnet:
-            await registry.discover_subnet(registry.scan_subnet)
-        # After local discovery, so cloud devices already reachable locally are
-        # skipped and the rest can be paired with their LAN IPs.
-        await registry.attach_cloud()
-        registry.log_cloud_fallback_hint()
-    except Exception as e:  # noqa: BLE001 - never block startup on discovery
-        logger.error(f"Initial discovery failed: {e}")
+    # Discovery (broadcast + subnet sweep + cloud) can take many seconds, so run
+    # it in the background and let the API serve immediately. The frontend watches
+    # registry.discovering (via /api/status) and surfaces devices as they appear,
+    # instead of blocking on an empty list at startup.
+    discovery = asyncio.create_task(registry.run_startup_discovery())
     yield
+    discovery.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await discovery
     await registry.aclose()
 
 

@@ -51,6 +51,23 @@ def test_config_exposes_configured_energy_rate(monkeypatch):
     assert body["energy_currency"] == "€"
 
 
+def test_status_reports_idle_and_device_count(client):
+    body = client.get("/api/status").json()
+    assert body["discovering"] is False
+    assert body["device_count"] == 4
+
+
+def test_status_reflects_active_discovery(monkeypatch):
+    reg = DeviceRegistry()
+    reg.discovering = True
+    monkeypatch.setattr(routes, "registry", reg)
+    app = FastAPI()
+    app.include_router(routes.router)
+    body = TestClient(app).get("/api/status").json()
+    assert body["discovering"] is True
+    assert body["device_count"] == 0
+
+
 def test_list_devices(client):
     body = client.get("/api/devices").json()
     assert {d["id"] for d in body} == {"10.0.0.1", "10.0.0.2", "10.0.0.3", "10.0.0.4"}

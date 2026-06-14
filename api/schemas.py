@@ -94,6 +94,15 @@ class ServerConfig(BaseModel):
     )
 
 
+class ServerStatus(BaseModel):
+    """Live server state the UI polls to reflect background work."""
+
+    discovering: bool = Field(
+        description="True while the initial network sweep is still running."
+    )
+    device_count: int = Field(description="Devices currently known to the server.")
+
+
 class PowerRequest(BaseModel):
     on: bool
 

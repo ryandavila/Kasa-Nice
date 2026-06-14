@@ -150,6 +150,18 @@
 					Try again
 				</button>
 			</div>
+		{:else if deviceStore.discovering && !deviceStore.devices.length}
+			<div class="rounded-card border border-dashed border-line bg-surface/40 p-12 text-center">
+				<span
+					class="mx-auto grid h-14 w-14 animate-pulse place-items-center rounded-2xl bg-accent-soft text-accent-ink"
+				>
+					<Icon name="radar" size={26} />
+				</span>
+				<p class="mt-4 font-display text-lg text-ink">Scanning your network…</p>
+				<p class="mx-auto mt-1 max-w-xs text-sm text-muted">
+					Looking for Kasa devices. They'll appear here as they're found.
+				</p>
+			</div>
 		{:else if deviceStore.isEmpty}
 			<div class="rounded-card border border-dashed border-line bg-surface/40 p-12 text-center">
 				<span
@@ -170,6 +182,14 @@
 				</button>
 			</div>
 		{:else}
+			{#if deviceStore.discovering}
+				<div
+					class="mb-5 flex items-center gap-2.5 rounded-card border border-line bg-surface/60 px-4 py-2.5 text-sm text-muted"
+				>
+					<Icon name="refresh" size={15} class="animate-spin" />
+					Still scanning the network — more devices may appear.
+				</div>
+			{/if}
 			<div class="space-y-10">
 				{#each groups as group (group.type)}
 					<section>

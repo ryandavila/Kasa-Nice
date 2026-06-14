@@ -104,6 +104,10 @@ class DeviceRegistry:
         # genuinely-offline hosts, these respond — so they're candidates for cloud
         # control, and we surface a hint about them when the fallback is off.
         self._unreadable_hosts: set[str] = set()
+        # True while the initial network sweep is running. Exposed via /api/status
+        # so the UI can show a "scanning…" state instead of an empty list — the
+        # sweep is launched in the background so the API serves immediately.
+        self.discovering: bool = False
 
     async def _refresh(self, device: KasaDevice) -> bool:
         """Pull live state. Returns False if the device couldn't be read.
@@ -221,6 +225,29 @@ class DeviceRegistry:
         logger.info(f"Discovered {len(self._devices)} devices")
         self._persist()
         return list(self._devices.values())
+
+    async def run_startup_discovery(self) -> None:
+        """Run the full initial discovery, flagging ``discovering`` throughout.
+
+        Broadcast discovery, an optional subnet sweep, and the cloud attach can
+        together take many seconds, so this is launched as a background task at
+        startup (the API serves immediately). The ``discovering`` flag lets the
+        frontend show progress and surface devices as they appear, rather than a
+        misleading empty list. Never raises — startup must not depend on it.
+        """
+        self.discovering = True
+        try:
+            await self.discover_all()
+            if self.scan_subnet:
+                await self.discover_subnet(self.scan_subnet)
+            # After local discovery, so cloud devices already reachable locally
+            # are skipped and the rest can be paired with their LAN IPs.
+            await self.attach_cloud()
+            self.log_cloud_fallback_hint()
+        except Exception as e:  # noqa: BLE001 - never let startup discovery crash
+            logger.error(f"Initial discovery failed: {e}")
+        finally:
+            self.discovering = False
 
     async def discover_target(self, target: str) -> list[KasaDevice]:
         """Probe a single IP (or broadcast address) and merge results in."""

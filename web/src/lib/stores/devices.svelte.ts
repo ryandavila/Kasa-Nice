@@ -1,6 +1,7 @@
 import {
 	listDevices,
 	getState,
+	getStatus,
 	discoverDevices,
 	scanSubnet,
 	setPower,
@@ -30,8 +31,11 @@ class DeviceStore {
 	busy = $state<Record<string, boolean>>({});
 	/** Whether the last background poll reached the hub. */
 	live = $state(true);
+	/** True while the server's initial network sweep is still running. */
+	discovering = $state(false);
 
 	private pollTimer: ReturnType<typeof setInterval> | null = null;
+	private discoveryTimer: ReturnType<typeof setTimeout> | null = null;
 
 	get isEmpty() {
 		return this.status === 'ready' && this.devices.length === 0;
@@ -87,6 +91,33 @@ class DeviceStore {
 			this.error = message(e);
 			this.status = 'error';
 		}
+		// If the server is still doing its initial sweep, watch it so devices
+		// appear as they're found instead of showing a misleading empty list.
+		try {
+			this.discovering = (await getStatus()).discovering;
+		} catch {
+			this.discovering = false;
+		}
+		if (this.discovering) this.monitorDiscovery();
+	}
+
+	/**
+	 * Poll quickly while the startup sweep runs, merging devices as they appear,
+	 * and stop once the server reports discovery is done. Idempotent.
+	 */
+	private monitorDiscovery(intervalMs = 1500) {
+		if (this.discoveryTimer) return;
+		const tick = async () => {
+			try {
+				const [devices, status] = await Promise.all([listDevices(), getStatus()]);
+				this.merge(devices);
+				this.discovering = status.discovering;
+			} catch {
+				// transient; keep watching until the server answers
+			}
+			this.discoveryTimer = this.discovering ? setTimeout(tick, intervalMs) : null;
+		};
+		this.discoveryTimer = setTimeout(tick, intervalMs);
 	}
 
 	/** Silently re-read live state from the hub; never disrupts the UI on failure. */
@@ -111,6 +142,10 @@ class DeviceStore {
 		if (this.pollTimer) {
 			clearInterval(this.pollTimer);
 			this.pollTimer = null;
+		}
+		if (this.discoveryTimer) {
+			clearTimeout(this.discoveryTimer);
+			this.discoveryTimer = null;
 		}
 	}
 

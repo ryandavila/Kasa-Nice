@@ -1,3 +1,5 @@
+from unittest.mock import AsyncMock
+
 import pytest
 from conftest import FakeChild, FakeDevice
 from fastapi import FastAPI
@@ -71,6 +73,47 @@ def test_status_reflects_active_discovery(monkeypatch):
 def test_list_devices(client):
     body = client.get("/api/devices").json()
     assert {d["id"] for d in body} == {"10.0.0.1", "10.0.0.2", "10.0.0.3", "10.0.0.4"}
+
+
+def test_discover_broadcast_also_refreshes_cloud_devices(monkeypatch):
+    # Broadcast discovery (no target) must re-attach cloud devices and return
+    # them alongside local ones, so a strip onboarded later appears without a
+    # restart. Stub the network-touching methods; all() returns both buckets.
+    reg = DeviceRegistry()
+    reg._devices = {"10.0.0.1": FakeDevice("10.0.0.1", alias="Plug")}
+    reg._cloud_devices = {
+        "10.0.0.9": FakeDevice("10.0.0.9", alias="Strip", type_name="Strip")
+    }
+    reg.discover_all = AsyncMock(return_value=list(reg._devices.values()))
+    reg.attach_cloud = AsyncMock(return_value=list(reg._cloud_devices.values()))
+    monkeypatch.setattr(routes, "registry", reg)
+    app = FastAPI()
+    app.include_router(routes.router)
+
+    body = TestClient(app).post("/api/discover", json={}).json()
+
+    reg.discover_all.assert_awaited_once()
+    reg.attach_cloud.assert_awaited_once()
+    assert {d["id"] for d in body} == {"10.0.0.1", "10.0.0.9"}  # local + cloud
+
+
+def test_discover_target_does_not_attach_cloud(monkeypatch):
+    # A targeted single-IP probe is unchanged: discover_target only, no cloud
+    # re-attach and no broadcast.
+    reg = DeviceRegistry()
+    reg.discover_target = AsyncMock(return_value=[FakeDevice("10.0.0.5", alias="Found")])
+    reg.discover_all = AsyncMock()
+    reg.attach_cloud = AsyncMock()
+    monkeypatch.setattr(routes, "registry", reg)
+    app = FastAPI()
+    app.include_router(routes.router)
+
+    body = TestClient(app).post("/api/discover", json={"target": "10.0.0.5"}).json()
+
+    reg.discover_target.assert_awaited_once_with("10.0.0.5")
+    reg.discover_all.assert_not_awaited()
+    reg.attach_cloud.assert_not_awaited()
+    assert {d["id"] for d in body} == {"10.0.0.5"}
 
 
 def test_toggle_power(client):

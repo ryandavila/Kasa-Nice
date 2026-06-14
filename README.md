@@ -73,12 +73,28 @@ All endpoints are under `/api`; interactive docs live at `http://localhost:8080/
 | `TPLINK_USERNAME` | _(unset)_ | TP-Link cloud email, required for newer SMART-protocol devices (e.g. KP125M) |
 | `TPLINK_PASSWORD` | _(unset)_ | TP-Link cloud password, paired with `TPLINK_USERNAME` |
 | `KASA_SCAN_SUBNET` | _(unset)_ | CIDR subnet (e.g. `10.3.27.0/24`) swept by unicast on startup and offered as the default in the Discovery tab |
+| `KASA_CLOUD_FALLBACK` | `0` | Set to `1` to control devices that no longer accept local auth (e.g. HS300 strips) via the TP-Link cloud — see below |
+| `KASA_CLOUD_MODELS` | `HS300` | Comma-separated model prefixes routed through the cloud when the fallback is on |
 
 Newer Kasa devices use TP-Link's SMART protocol and authenticate before they
 can be discovered or controlled. Provide your TP-Link cloud credentials via a
 `.env` file (copy `.env.example` to `.env` and fill it in); Docker Compose reads
 it automatically. Without them, only legacy plugs are reachable. `.env` is
 gitignored — never commit real credentials.
+
+### Cloud fallback for devices that dropped local control
+
+Some older devices (notably the **HS300** power strip) shipped a firmware update
+that replaced their local KLAP authentication with a token/certificate scheme
+[python-kasa can't yet speak](https://github.com/python-kasa/python-kasa/issues/1604),
+and disabled their legacy local port. They stay fully controllable through
+TP-Link's cloud — the same path the Kasa app uses. Set `KASA_CLOUD_FALLBACK=1`
+(reusing `TPLINK_USERNAME`/`TPLINK_PASSWORD`) and, after local discovery, the
+server logs into the cloud and attaches any matching online devices that aren't
+already reachable locally. They appear and toggle just like local devices; their
+LAN IP is recovered from the MAC so they show the same `host`. Control round-trips
+to TP-Link's servers, so it's a little slower than local, and energy monitoring
+isn't wired up for these yet.
 
 Broadcast discovery only reaches devices on the server's own subnet — it can't
 cross VLAN boundaries. If your plugs live on a separate subnet (e.g. an isolated

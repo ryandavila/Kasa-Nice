@@ -14,6 +14,12 @@ from typing import Any
 from kasa import Credentials, Discover, Module
 from kasa import Device as KasaDevice
 
+from .cloud_service import (
+    KasaCloudClient,
+    _norm_mac,
+    discover_cloud_devices,
+    load_cloud_client,
+)
 from .device_store import HostStore
 from .logging_config import get_logger
 from .schemas import ChildPlug, Device, Hsv, Usage, UsageStat
@@ -65,9 +71,18 @@ class DeviceRegistry:
         store: HostStore | None = None,
         credentials: Credentials | None = None,
         *,
+        cloud_client: KasaCloudClient | None = None,
+        cloud_models: tuple[str, ...] = (),
         scan_subnet: str | None = None,
     ) -> None:
         self._devices: dict[str, KasaDevice] = {}
+        # Devices controlled through the TP-Link cloud (e.g. HS300 strips whose
+        # firmware dropped local control). Kept separate so local re-discovery,
+        # which rebuilds ``_devices``, never evicts them. They duck-type the
+        # python-kasa interface, so the rest of the registry treats them alike.
+        self._cloud_devices: dict[str, KasaDevice] = {}
+        self._cloud_client = cloud_client
+        self._cloud_models = cloud_models
         self._store = store
         # Passed to every Discover.discover() call. Newer SMART-protocol devices
         # authenticate before discovery; None (no creds) leaves legacy plugs
@@ -198,19 +213,81 @@ class DeviceRegistry:
         """Re-read live state from cached devices (no network discovery).
 
         Used by the frontend poll so the UI reflects changes made elsewhere
-        (e.g. the Kasa app or a physical switch).
+        (e.g. the Kasa app or a physical switch). Covers cloud devices too.
         """
-        await asyncio.gather(*(self._refresh(d) for d in self._devices.values()))
-        return list(self._devices.values())
+        devices = self.all()
+        await asyncio.gather(*(self._refresh(d) for d in devices))
+        return devices
 
     def all(self) -> list[KasaDevice]:
-        return list(self._devices.values())
+        return list(self._devices.values()) + list(self._cloud_devices.values())
 
     def get(self, device_id: str) -> KasaDevice:
-        device = self._devices.get(device_id)
+        device = self._devices.get(device_id) or self._cloud_devices.get(device_id)
         if device is None:
             raise DeviceNotFoundError(device_id)
         return device
+
+    async def attach_cloud(self) -> list[KasaDevice]:
+        """Discover and cache devices that are only controllable via the cloud.
+
+        Excludes anything already controlled locally (matched by MAC), so a device
+        reachable both ways isn't listed twice, and resolves each cloud device's
+        LAN IP from its MAC when a known host advertises it, so it shows the same
+        ``host`` as locally-discovered devices. Best-effort: never raises.
+        """
+        if self._cloud_client is None:
+            return []
+        try:
+            local_macs = frozenset(
+                _norm_mac(m)
+                for d in self._devices.values()
+                if (m := getattr(d, "mac", None))
+            )
+            cloud_devices = await discover_cloud_devices(
+                self._cloud_client,
+                models=self._cloud_models,
+                skip_macs=local_macs,
+            )
+        except Exception as e:  # noqa: BLE001 - cloud must never break startup
+            logger.error(f"Cloud device attach failed: {e}")
+            return []
+
+        mac_to_ip = await self._known_host_ips()
+        self._cloud_devices = {}
+        for device in cloud_devices:
+            if (ip := mac_to_ip.get(device.mac)) is not None:
+                device.host = ip
+            self._cloud_devices[device.host] = device
+        logger.info(f"Attached {len(self._cloud_devices)} cloud device(s)")
+        return list(self._cloud_devices.values())
+
+    async def _known_host_ips(self) -> dict[str, str]:
+        """Map normalized MAC -> LAN IP for known hosts not controlled locally.
+
+        Discovery (unauthenticated) still reports a device's MAC even when its
+        credentials are rejected, letting us pair a cloud device with its LAN IP.
+        """
+        if self._store is None:
+            return {}
+        unresolved = self._store.load() - set(self._devices)
+        result: dict[str, str] = {}
+
+        async def probe(host: str) -> None:
+            try:
+                device = await Discover.discover_single(host)
+            except Exception:  # noqa: BLE001 - host may be offline
+                return
+            if mac := getattr(device, "mac", None):
+                result[_norm_mac(mac)] = host
+
+        await asyncio.gather(*(probe(h) for h in unresolved))
+        return result
+
+    async def aclose(self) -> None:
+        """Release external resources (the cloud HTTP session)."""
+        if self._cloud_client is not None:
+            await self._cloud_client.close()
 
     @staticmethod
     def _light(device: KasaDevice):
@@ -354,8 +431,11 @@ def _load_credentials() -> Credentials | None:
 # KASA_STATE_FILE (default ./data/known_devices.json); mount that path as a
 # volume to keep manually-added devices across container rebuilds.
 _STATE_FILE = Path(os.getenv("KASA_STATE_FILE", "data/known_devices.json"))
+_cloud = load_cloud_client()
 registry = DeviceRegistry(
     HostStore(_STATE_FILE),
     _load_credentials(),
+    cloud_client=_cloud[0] if _cloud else None,
+    cloud_models=_cloud[1] if _cloud else (),
     scan_subnet=os.getenv("KASA_SCAN_SUBNET"),
 )

@@ -118,6 +118,40 @@ class DeviceRegistry:
             logger.error(f"Error updating device {device.host}: {e}")
             return False
 
+    @staticmethod
+    async def _safe_disconnect(device: KasaDevice) -> None:
+        """Release a dropped device's transport (its aiohttp session/connector).
+
+        python-kasa opens a client session during discovery. When we discard a
+        device — failed auth, offline, or probed only for its MAC — without
+        disconnecting, that session is garbage-collected while still open and
+        asyncio logs "Unclosed client session"/"Unclosed connector" at startup.
+        Only ever called on devices we are NOT keeping, so it never closes a
+        device still in the registry. Best-effort: a device that never connected
+        raises, which we swallow.
+        """
+        disconnect = getattr(device, "disconnect", None)
+        if disconnect is None:
+            return
+        try:
+            await disconnect()
+        except Exception as e:  # noqa: BLE001 - cleanup must never raise
+            logger.debug(f"Disconnect of {getattr(device, 'host', '?')} failed: {e}")
+
+    async def _store_device(self, device: KasaDevice) -> None:
+        """Cache a readable device, disconnecting any object it supersedes.
+
+        Re-discovery (e.g. the subnet sweep after a broadcast, or a manual
+        re-scan) returns a *fresh* device object for a host we already hold. If
+        we just overwrote the slot, the previous object's still-open aiohttp
+        session would be orphaned and later log "Unclosed client session". So
+        release the old one first.
+        """
+        old = self._devices.get(device.host)
+        if old is not None and old is not device:
+            await self._safe_disconnect(old)
+        self._devices[device.host] = device
+
     def _persist(self) -> None:
         """Save the union of known and currently-cached hosts.
 
@@ -139,10 +173,11 @@ class DeviceRegistry:
             return
         for device in response.values():
             if await self._refresh(device):
-                self._devices[device.host] = device
+                await self._store_device(device)
                 self._unreadable_hosts.discard(device.host)
             else:
                 self._unreadable_hosts.add(device.host)
+                await self._safe_disconnect(device)
                 logger.warning(
                     f"Known host {device.host} answered but could not be read "
                     "(bad credentials or offline); not serving it"
@@ -153,17 +188,28 @@ class DeviceRegistry:
         logger.info("Starting device discovery")
         discovered = await Discover.discover(credentials=self._credentials)
         self._unreadable_hosts = set()
+        # A re-scan rebuilds the cache with fresh device objects; release the
+        # previous ones so their aiohttp sessions don't leak as "Unclosed".
+        previous = self._devices
         self._devices = {}
         for d in discovered.values():
             if await self._refresh(d):
-                self._devices[d.host] = d
+                await self._store_device(d)
             else:
                 self._unreadable_hosts.add(d.host)
+                await self._safe_disconnect(d)
 
         # Re-attach known hosts that broadcast discovery didn't reach.
         if self._store is not None:
             for host in self._store.load() - set(self._devices):
                 await self._probe_host(host)
+
+        # Devices from the prior scan that weren't re-cached are now orphaned;
+        # disconnect them (by identity, never closing a device we kept).
+        kept = set(map(id, self._devices.values()))
+        for old in previous.values():
+            if id(old) not in kept:
+                await self._safe_disconnect(old)
 
         logger.info(f"Discovered {len(self._devices)} devices")
         self._persist()
@@ -176,11 +222,12 @@ class DeviceRegistry:
         found: list[KasaDevice] = []
         for device in response.values():
             if await self._refresh(device):
-                self._devices[device.host] = device
+                await self._store_device(device)
                 self._unreadable_hosts.discard(device.host)
                 found.append(device)
             else:
                 self._unreadable_hosts.add(device.host)
+                await self._safe_disconnect(device)
                 logger.warning(
                     f"Device at {device.host} answered but could not be read "
                     "(bad credentials or offline)"
@@ -218,11 +265,12 @@ class DeviceRegistry:
                 except Exception:  # noqa: BLE001 - most addresses have no device
                     return
                 if await self._refresh(device):
-                    self._devices[device.host] = device
+                    await self._store_device(device)
                     self._unreadable_hosts.discard(device.host)
                     found.append(device)
                 else:
                     self._unreadable_hosts.add(device.host)
+                    await self._safe_disconnect(device)
 
         await asyncio.gather(*(probe(h) for h in hosts))
         logger.info(f"Subnet sweep of {subnet} found {len(found)} devices")
@@ -300,6 +348,8 @@ class DeviceRegistry:
                 return
             if mac := getattr(device, "mac", None):
                 result[_norm_mac(mac)] = host
+            # Probed only for its MAC; release its session so it isn't left open.
+            await self._safe_disconnect(device)
 
         await asyncio.gather(*(probe(h) for h in unresolved))
         return result
@@ -323,7 +373,17 @@ class DeviceRegistry:
         )
 
     async def aclose(self) -> None:
-        """Release external resources (the cloud HTTP session)."""
+        """Release external resources at shutdown.
+
+        Disconnects every cached device's aiohttp session (otherwise they log
+        "Unclosed client session" during interpreter teardown) and closes the
+        shared cloud HTTP session. Cloud devices share that session, so only the
+        local devices need an individual disconnect.
+        """
+        await asyncio.gather(
+            *(self._safe_disconnect(d) for d in self._devices.values())
+        )
+        self._devices = {}
         if self._cloud_client is not None:
             await self._cloud_client.close()
 

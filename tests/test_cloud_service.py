@@ -10,6 +10,8 @@ rather than a plugin, consistent with ``test_kasa_service.py``.
 
 import asyncio
 import json
+import logging
+from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -336,6 +338,58 @@ def test_energy_summary_sums_per_outlet_using_device_clock():
     assert summary["daily_raw"][6] == pytest.approx(0.2)
     assert summary["daily_raw"][5] == pytest.approx(0.1)
     assert summary["monthly_raw"][3] == pytest.approx(4.0)
+
+
+def _clock_route(clock: dict):
+    """Route emeter passthroughs, serving ``clock`` for the time read."""
+
+    def route(_app_server_url, _device_id, request):
+        if "time" in request:
+            return {"time": {"get_time": clock}}
+        emeter = request["emeter"]
+        if "get_realtime" in emeter:
+            return {
+                "emeter": {"get_realtime": {"power_mw": 1000, "voltage_mv": 120000}}
+            }
+        if "get_daystat" in emeter:
+            return {"emeter": {"get_daystat": {"day_list": []}}}
+        if "get_monthstat" in emeter:
+            return {"emeter": {"get_monthstat": {"month_list": []}}}
+        raise AssertionError(f"unexpected request {request}")
+
+    return route
+
+
+def test_energy_summary_warns_once_on_clock_drift(caplog):
+    drifted = {"year": 2025, "month": 1, "mday": 1, "hour": 0, "min": 0, "sec": 0}
+    device = _cloud_device(AsyncMock(side_effect=_clock_route(drifted)))
+    device.children = [CloudChild(device, "c0", "Outlet 1", True)]
+
+    with caplog.at_level(logging.WARNING, logger="api.cloud_service"):
+        asyncio.run(device.energy_summary())
+        asyncio.run(device.energy_summary())
+
+    drift = [r for r in caplog.records if "clock is off" in r.getMessage()]
+    assert len(drift) == 1  # once-guard: warned only on the first poll
+
+
+def test_energy_summary_no_drift_warning_when_clock_current(caplog):
+    now = datetime.now()
+    current = {
+        "year": now.year,
+        "month": now.month,
+        "mday": now.day,
+        "hour": now.hour,
+        "min": now.minute,
+        "sec": now.second,
+    }
+    device = _cloud_device(AsyncMock(side_effect=_clock_route(current)))
+    device.children = [CloudChild(device, "c0", "Outlet 1", True)]
+
+    with caplog.at_level(logging.WARNING, logger="api.cloud_service"):
+        asyncio.run(device.energy_summary())
+
+    assert not [r for r in caplog.records if "clock is off" in r.getMessage()]
 
 
 # ── discover_cloud_devices ───────────────────────────────────────────────────

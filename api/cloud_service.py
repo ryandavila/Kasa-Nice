@@ -19,7 +19,7 @@ import asyncio
 import json
 import os
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
 
@@ -221,6 +221,9 @@ class CloudDevice:
         self.host = _format_mac(mac)
         self.is_on = False
         self.children: list[CloudChild] = []
+        # Once-guard so we warn about a drifted device clock at most once per
+        # device, not on every usage poll.
+        self._clock_drift_warned: bool = False
         # A strip is neither color nor dimmable, so the empty sys_info makes
         # serialize_device report both as false. It does meter energy per outlet,
         # so advertise an Energy module (read via energy_summary()).
@@ -298,6 +301,33 @@ class CloudDevice:
                 "get_time"
             ]
             year, month, today = clock["year"], clock["month"], clock["mday"]
+            # The strip's internal clock can drift far behind real time, which
+            # silently misattributes energy to the wrong day/month bucket. Warn
+            # once if it's off by more than a day. Guarded so a malformed clock
+            # can never break the normal return path.
+            if not self._clock_drift_warned:
+                try:
+                    device_dt = datetime(
+                        year,
+                        month,
+                        today,
+                        clock.get("hour", 0),
+                        clock.get("min", 0),
+                        clock.get("sec", 0),
+                    )
+                    drift = datetime.now() - device_dt
+                    if abs(drift) > timedelta(days=1):
+                        self._clock_drift_warned = True
+                        logger.warning(
+                            f"Cloud device {self.host} clock is off by "
+                            f"~{abs(drift).days} days (device reports "
+                            f"{device_dt.date()}, server is "
+                            f"{datetime.now().date()}); energy is attributed to "
+                            "the wrong day/month. Resync the device clock in the "
+                            "Kasa app."
+                        )
+                except Exception:  # noqa: BLE001 - never break on a bad clock
+                    pass
         except Exception as e:  # noqa: BLE001 - fall back to the server clock
             logger.warning(f"Cloud device {self.host} clock read failed ({e})")
             now = datetime.now()

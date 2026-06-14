@@ -25,3 +25,18 @@ services:
       # restarts and rebuilds.
       - ./data:/app/data
     restart: unless-stopped
+    # Probe the API with stdlib Python (the slim image has no curl/wget). Reads
+    # KASA_PORT so it tracks the configured port. The app serves immediately —
+    # discovery runs in the background — so a short start period is enough.
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import os,urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:'+os.environ.get('KASA_PORT','8080')+'/api/health',timeout=3).status==200 else 1)",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s

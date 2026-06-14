@@ -109,6 +109,47 @@ def test_get_usage_without_emeter():
         asyncio.run(reg.get_usage("10.0.0.8"))
 
 
+# ── cloud poll throttling ────────────────────────────────────────────────────
+
+
+def test_refresh_all_throttles_cloud_but_refreshes_local_every_poll():
+    reg = DeviceRegistry()
+    reg._cloud_poll_interval = 9999  # effectively never re-poll cloud in the test
+    local = FakeDevice("10.0.0.1")
+    cloud = FakeDevice("cloud-1")
+    reg._devices = {local.host: local}
+    reg._cloud_devices = {cloud.host: cloud}
+
+    for _ in range(3):
+        asyncio.run(reg.refresh_all())
+
+    assert local.update_count == 3  # local refreshed every poll
+    assert cloud.update_count == 1  # cloud refreshed once, then throttled
+
+
+def test_refresh_all_polls_cloud_again_once_interval_elapses():
+    reg = DeviceRegistry()
+    reg._cloud_poll_interval = 0  # no throttle: cloud refreshes every poll
+    cloud = FakeDevice("cloud-1")
+    reg._cloud_devices = {cloud.host: cloud}
+
+    asyncio.run(reg.refresh_all())
+    asyncio.run(reg.refresh_all())
+
+    assert cloud.update_count == 2
+
+
+def test_refresh_all_returns_cloud_devices_even_when_throttled():
+    reg = DeviceRegistry()
+    reg._cloud_poll_interval = 9999
+    reg._cloud_devices = {"cloud-1": FakeDevice("cloud-1")}
+
+    asyncio.run(reg.refresh_all())  # first poll refreshes + stamps
+    returned = asyncio.run(reg.refresh_all())  # second skips the refresh
+
+    assert [d.host for d in returned] == ["cloud-1"]  # still listed for the UI
+
+
 # ── persistence ─────────────────────────────────────────────────────────────
 
 

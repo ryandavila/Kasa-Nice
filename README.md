@@ -75,6 +75,7 @@ All endpoints are under `/api`; interactive docs live at `http://localhost:8080/
 | `KASA_SCAN_SUBNET` | _(unset)_ | CIDR subnet (e.g. `10.3.27.0/24`) swept by unicast on startup and offered as the default in the Discovery tab |
 | `KASA_CLOUD_FALLBACK` | `0` | Set to `1` to control devices that no longer accept local auth (e.g. HS300 strips) via the TP-Link cloud — see below |
 | `KASA_CLOUD_MODELS` | `HS300` | Comma-separated model prefixes routed through the cloud when the fallback is on |
+| `KASA_CLOUD_POLL_INTERVAL` | `30` | Seconds between cloud-device state refreshes during the live poll (local devices refresh every poll). Higher = fewer TP-Link round-trips |
 | `KASA_ENERGY_RATE` | _(unset)_ | Flat cost per kWh (a number, e.g. `0.18`) used to show energy cost — see below. Leave unset to hide cost |
 | `KASA_ENERGY_CURRENCY` | `$` | Currency symbol/prefix shown before cost amounts |
 
@@ -97,7 +98,9 @@ already reachable locally. They appear, toggle, and report energy
 just like local devices; their LAN IP is recovered from the MAC so they show the
 same `host`. Per-outlet energy is aggregated into a whole-strip total, using the
 device's own clock for "today"/"this month". Control round-trips to TP-Link's
-servers, so it's a little slower than local.
+servers, so it's a little slower than local, and the live state poll refreshes
+cloud devices only every `KASA_CLOUD_POLL_INTERVAL` seconds (default 30) — rather
+than every few seconds like local devices — to avoid hammering the cloud API.
 
 ### Energy cost (optional)
 

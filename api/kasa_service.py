@@ -7,6 +7,7 @@ This is the logic that previously lived inside the NiceGUI page handlers in
 import asyncio
 import ipaddress
 import os
+import time
 from colorsys import hsv_to_rgb, rgb_to_hsv
 from pathlib import Path
 from typing import Any
@@ -77,6 +78,7 @@ class DeviceRegistry:
         scan_subnet: str | None = None,
         energy_rate: float | None = None,
         energy_currency: str = "$",
+        cloud_poll_interval: float = 30.0,
     ) -> None:
         self._devices: dict[str, KasaDevice] = {}
         # Devices controlled through the TP-Link cloud (e.g. HS300 strips whose
@@ -86,6 +88,12 @@ class DeviceRegistry:
         self._cloud_devices: dict[str, KasaDevice] = {}
         self._cloud_client = cloud_client
         self._cloud_models = cloud_models
+        # Each cloud refresh is a round-trip to TP-Link's servers, so the state
+        # poll refreshes cloud devices at most this often (seconds) instead of
+        # every few seconds like local devices — keeping polls fast and avoiding
+        # cloud rate limits. ``-inf`` forces a refresh on the first poll.
+        self._cloud_poll_interval = cloud_poll_interval
+        self._last_cloud_refresh: float = float("-inf")
         self._store = store
         # Passed to every Discover.discover() call. Newer SMART-protocol devices
         # authenticate before discovery; None (no creds) leaves legacy plugs
@@ -315,11 +323,22 @@ class DeviceRegistry:
         """Re-read live state from cached devices (no network discovery).
 
         Used by the frontend poll so the UI reflects changes made elsewhere
-        (e.g. the Kasa app or a physical switch). Covers cloud devices too.
+        (e.g. the Kasa app or a physical switch). Local devices refresh on every
+        call; cloud devices are throttled to ``cloud_poll_interval`` seconds,
+        since each cloud refresh is a TP-Link round-trip — polling them as often
+        as local devices is slow and risks rate limiting. They remain in the
+        returned list with their last-known state between refreshes. (Explicit
+        actions like toggling a cloud outlet still refresh it immediately.)
         """
-        devices = self.all()
-        await asyncio.gather(*(self._refresh(d) for d in devices))
-        return devices
+        to_refresh = list(self._devices.values())
+        cloud = list(self._cloud_devices.values())
+        now = time.monotonic()
+        if cloud and now - self._last_cloud_refresh >= self._cloud_poll_interval:
+            # Stamp before awaiting so an overlapping poll doesn't also refresh.
+            self._last_cloud_refresh = now
+            to_refresh += cloud
+        await asyncio.gather(*(self._refresh(d) for d in to_refresh))
+        return self.all()
 
     def all(self) -> list[KasaDevice]:
         return list(self._devices.values()) + list(self._cloud_devices.values())
@@ -361,6 +380,8 @@ class DeviceRegistry:
             if (ip := mac_to_ip.get(device.mac)) is not None:
                 device.host = ip
             self._cloud_devices[device.host] = device
+        # State was just read during the attach, so reset the poll throttle.
+        self._last_cloud_refresh = time.monotonic()
         logger.info(f"Attached {len(self._cloud_devices)} cloud device(s)")
         return list(self._cloud_devices.values())
 
@@ -632,6 +653,23 @@ def _load_energy_rate() -> float | None:
 # volume to keep manually-added devices across container rebuilds.
 _STATE_FILE = Path(os.getenv("KASA_STATE_FILE", "data/known_devices.json"))
 _cloud = load_cloud_client()
+
+
+def _load_cloud_poll_interval() -> float:
+    """Seconds between cloud-device refreshes during the state poll.
+
+    Defaults to 30s; falls back to the default on a missing or invalid value.
+    """
+    raw = os.getenv("KASA_CLOUD_POLL_INTERVAL")
+    if raw is None or not raw.strip():
+        return 30.0
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        logger.warning(f"Ignoring invalid KASA_CLOUD_POLL_INTERVAL={raw!r}; using 30s")
+        return 30.0
+
+
 registry = DeviceRegistry(
     HostStore(_STATE_FILE),
     _load_credentials(),
@@ -640,4 +678,5 @@ registry = DeviceRegistry(
     scan_subnet=os.getenv("KASA_SCAN_SUBNET"),
     energy_rate=_load_energy_rate(),
     energy_currency=os.getenv("KASA_ENERGY_CURRENCY", "$"),
+    cloud_poll_interval=_load_cloud_poll_interval(),
 )

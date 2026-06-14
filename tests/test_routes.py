@@ -101,7 +101,9 @@ def test_discover_target_does_not_attach_cloud(monkeypatch):
     # A targeted single-IP probe is unchanged: discover_target only, no cloud
     # re-attach and no broadcast.
     reg = DeviceRegistry()
-    reg.discover_target = AsyncMock(return_value=[FakeDevice("10.0.0.5", alias="Found")])
+    reg.discover_target = AsyncMock(
+        return_value=[FakeDevice("10.0.0.5", alias="Found")]
+    )
     reg.discover_all = AsyncMock()
     reg.attach_cloud = AsyncMock()
     monkeypatch.setattr(routes, "registry", reg)

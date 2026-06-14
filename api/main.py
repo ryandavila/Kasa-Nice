@@ -8,6 +8,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
+from .energy_history import history, load_sample_interval, run_recorder
+from .events import router as events_router
 from .kasa_service import registry
 from .logging_config import get_logger, setup_logging
 from .routes import router
@@ -28,10 +30,16 @@ async def lifespan(app: FastAPI):
     # registry.discovering (via /api/status) and surfaces devices as they appear,
     # instead of blocking on an empty list at startup.
     discovery = asyncio.create_task(registry.run_startup_discovery())
+    # Sample metered devices on an interval and persist the readings, so energy
+    # history survives beyond what each device remembers. Runs alongside the API.
+    recorder = asyncio.create_task(
+        run_recorder(registry, history, load_sample_interval())
+    )
     yield
-    discovery.cancel()
-    with contextlib.suppress(asyncio.CancelledError):
-        await discovery
+    for task in (discovery, recorder):
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
     await registry.aclose()
 
 
@@ -59,6 +67,7 @@ def create_app() -> FastAPI:
     )
 
     app.include_router(router)
+    app.include_router(events_router)
 
     if WEB_BUILD_DIR.is_dir():
         _mount_spa(app)

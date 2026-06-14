@@ -114,3 +114,55 @@ class BrightnessRequest(BaseModel):
 class ColorRequest(BaseModel):
     hex: str | None = Field(default=None, pattern=r"^#?[0-9a-fA-F]{6}$")
     hsv: Hsv | None = None
+
+
+# ── Groups (rooms) & favorites ──────────────────────────────────────────────
+
+
+class Group(BaseModel):
+    """A user-defined room: a named, ordered set of device ids."""
+
+    id: str
+    name: str
+    device_ids: list[str] = Field(default_factory=list)
+
+
+class GroupCreate(BaseModel):
+    name: str = Field(min_length=1)
+
+
+class GroupUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1)
+    device_ids: list[str] | None = None
+
+
+class Favorites(BaseModel):
+    """The device ids the user has starred for quick access."""
+
+    device_ids: list[str] = Field(default_factory=list)
+
+
+# ── Persisted energy history ────────────────────────────────────────────────
+
+
+class EnergySample(BaseModel):
+    """One recorded power reading: unix epoch seconds and watts (null if unread)."""
+
+    ts: int
+    power_w: float | None = None
+
+
+class DailyEnergy(BaseModel):
+    """A persisted day's total energy (and optional flat-rate cost)."""
+
+    date: str = Field(description="Local date, ISO 'YYYY-MM-DD'.")
+    kwh: float
+    cost: float | None = None
+
+
+class EnergyHistory(BaseModel):
+    """Recorded history for a device: recent power samples and daily totals."""
+
+    device_id: str
+    samples: list[EnergySample] = Field(default_factory=list)
+    daily: list[DailyEnergy] = Field(default_factory=list)

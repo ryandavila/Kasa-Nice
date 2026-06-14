@@ -91,10 +91,11 @@ and disabled their legacy local port. They stay fully controllable through
 TP-Link's cloud — the same path the Kasa app uses. Set `KASA_CLOUD_FALLBACK=1`
 (reusing `TPLINK_USERNAME`/`TPLINK_PASSWORD`) and, after local discovery, the
 server logs into the cloud and attaches any matching online devices that aren't
-already reachable locally. They appear and toggle just like local devices; their
-LAN IP is recovered from the MAC so they show the same `host`. Control round-trips
-to TP-Link's servers, so it's a little slower than local, and energy monitoring
-isn't wired up for these yet.
+already reachable locally. They appear, toggle, and report energy
+just like local devices; their LAN IP is recovered from the MAC so they show the
+same `host`. Per-outlet energy is aggregated into a whole-strip total, using the
+device's own clock for "today"/"this month". Control round-trips to TP-Link's
+servers, so it's a little slower than local.
 
 Broadcast discovery only reaches devices on the server's own subnet — it can't
 cross VLAN boundaries. If your plugs live on a separate subnet (e.g. an isolated

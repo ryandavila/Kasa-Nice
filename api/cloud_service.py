@@ -19,14 +19,21 @@ import asyncio
 import json
 import os
 import uuid
+from datetime import datetime
 from types import SimpleNamespace
 from typing import Any
 
 import aiohttp
+from kasa import Module
 
 from .logging_config import get_logger
 
 logger = get_logger(__name__)
+
+# Marker stored under modules[Module.Energy] so serialize_device reports the strip
+# as having an energy meter. The real readings flow through energy_summary()
+# rather than the python-kasa module interface, so this only needs to be non-None.
+_EMETER_PRESENT = object()
 
 # The unified TP-Link cloud rejects stale clients with error -23003 ("App version
 # is too old"). The Kasa account is served by the same backend as Tapo, so we
@@ -161,6 +168,17 @@ def _format_mac(mac: str) -> str:
     return ":".join(n[i : i + 2] for i in range(0, len(n), 2)) or n
 
 
+def _entry_kwh(entry: dict[str, Any]) -> float:
+    """Energy of one daystat/monthstat entry in kWh.
+
+    Newer HS300 firmware reports integer watt-hours (``energy_wh``); older
+    firmware reports kWh as a float (``energy``).
+    """
+    if "energy_wh" in entry:
+        return entry["energy_wh"] / 1000
+    return float(entry.get("energy", 0.0))
+
+
 class CloudChild:
     """One outlet of a cloud-controlled power strip."""
 
@@ -203,11 +221,11 @@ class CloudDevice:
         self.host = _format_mac(mac)
         self.is_on = False
         self.children: list[CloudChild] = []
-        # The rest of the app reads these but power strips have neither, so the
-        # empty defaults make serialize_device report a non-color, non-dimmable,
-        # non-emeter strip.
+        # A strip is neither color nor dimmable, so the empty sys_info makes
+        # serialize_device report both as false. It does meter energy per outlet,
+        # so advertise an Energy module (read via energy_summary()).
         self.sys_info: dict[str, Any] = {}
-        self.modules: dict[Any, Any] = {}
+        self.modules: dict[Any, Any] = {Module.Energy: _EMETER_PRESENT}
         self.device_type = SimpleNamespace(name="Strip")
 
     async def _passthrough(self, request: dict[str, Any]) -> dict[str, Any]:
@@ -253,6 +271,76 @@ class CloudDevice:
 
     async def turn_off(self) -> None:
         await self._set_children_relay([c.child_id for c in self.children], False)
+
+    async def _emeter(
+        self, child_id: str, command: str, params: dict[str, Any]
+    ) -> dict[str, Any]:
+        resp = await self._passthrough(
+            {"context": {"child_ids": [child_id]}, "emeter": {command: params}}
+        )
+        return resp["emeter"][command]
+
+    async def energy_summary(self) -> dict[str, Any]:
+        """Aggregate every outlet's energy meter into one whole-strip summary.
+
+        HS300 metering is per-outlet (a parent-level read returns only slot 0), so
+        we read realtime power, this month's days, and this year's months for each
+        outlet — concurrently — and sum them. Returns the keyword arguments the
+        registry's ``Usage`` builder expects. On-demand only (driven by the usage
+        endpoint), so it never runs on the state poll.
+        """
+        # The device buckets energy history by its OWN clock, which can drift from
+        # the server's, so derive "today"/"this month" from the device itself —
+        # otherwise today_kwh/month_kwh query an empty bucket. Fall back to the
+        # server date if the clock read fails.
+        try:
+            clock = (await self._passthrough({"time": {"get_time": None}}))["time"][
+                "get_time"
+            ]
+            year, month, today = clock["year"], clock["month"], clock["mday"]
+        except Exception as e:  # noqa: BLE001 - fall back to the server clock
+            logger.warning(f"Cloud device {self.host} clock read failed ({e})")
+            now = datetime.now()
+            year, month, today = now.year, now.month, now.day
+
+        async def per_child(cid: str) -> tuple[dict, dict, dict]:
+            return await asyncio.gather(
+                self._emeter(cid, "get_realtime", {}),
+                self._emeter(cid, "get_daystat", {"year": year, "month": month}),
+                self._emeter(cid, "get_monthstat", {"year": year}),
+            )
+
+        results = await asyncio.gather(
+            *(per_child(c.child_id) for c in self.children),
+            return_exceptions=True,
+        )
+
+        total_power_mw = 0.0
+        voltages: list[float] = []
+        daily: dict[int, float] = {}
+        monthly: dict[int, float] = {}
+        for result in results:
+            if isinstance(result, BaseException):
+                logger.error(f"Cloud emeter read failed for {self.host}: {result}")
+                continue
+            realtime, daystat, monthstat = result
+            total_power_mw += realtime.get("power_mw") or 0
+            if voltage_mv := realtime.get("voltage_mv"):
+                voltages.append(voltage_mv / 1000)
+            for entry in daystat.get("day_list", []):
+                daily[entry["day"]] = daily.get(entry["day"], 0.0) + _entry_kwh(entry)
+            for entry in monthstat.get("month_list", []):
+                key = entry["month"]
+                monthly[key] = monthly.get(key, 0.0) + _entry_kwh(entry)
+
+        return {
+            "current_power_w": total_power_mw / 1000,
+            "voltage": sum(voltages) / len(voltages) if voltages else None,
+            "today_kwh": daily.get(today),
+            "month_kwh": monthly.get(month),
+            "daily_raw": daily,
+            "monthly_raw": monthly,
+        }
 
 
 async def discover_cloud_devices(

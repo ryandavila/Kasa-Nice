@@ -346,8 +346,18 @@ class DeviceRegistry:
         return device
 
     async def get_usage(self, device_id: str) -> Usage:
-        """Energy-monitoring data for a device: live power plus history."""
+        """Energy-monitoring data for a device: live power plus history.
+
+        Cloud devices supply their own aggregated summary (per-outlet meters
+        rolled up); local devices are read through the python-kasa Energy module.
+        """
         device = self.get(device_id)
+
+        # Cloud devices meter per outlet and expose a ready-made summary.
+        summary = getattr(device, "energy_summary", None)
+        if summary is not None:
+            return _build_usage(device.host, **await summary())
+
         energy = device.modules.get(Module.Energy)
         if energy is None:
             raise EnergyUnsupportedError(device_id)
@@ -371,26 +381,14 @@ class DeviceRegistry:
         except Exception as e:  # noqa: BLE001
             logger.error(f"Monthly stats for {device.host} failed: {e}")
 
-        daily = [
-            UsageStat(label=str(day), kwh=round(kwh, 3))
-            for day, kwh in sorted(daily_raw.items())
-        ]
-        monthly = [
-            UsageStat(
-                label=_MONTHS[month - 1] if 1 <= month <= 12 else str(month),
-                kwh=round(kwh, 3),
-            )
-            for month, kwh in sorted(monthly_raw.items())
-        ]
-
-        return Usage(
-            device_id=device.host,
+        return _build_usage(
+            device.host,
             current_power_w=_safe("current_consumption"),
             today_kwh=_safe("consumption_today"),
             month_kwh=_safe("consumption_this_month"),
             voltage=_safe("voltage"),
-            daily=daily,
-            monthly=monthly,
+            daily_raw=daily_raw,
+            monthly_raw=monthly_raw,
         )
 
     async def set_child_power(
@@ -403,6 +401,43 @@ class DeviceRegistry:
                 await self._refresh(device)
                 return device
         raise DeviceNotFoundError(f"{device_id}/{child_id}")
+
+
+def _build_usage(
+    device_id: str,
+    *,
+    current_power_w: float | None,
+    today_kwh: float | None,
+    month_kwh: float | None,
+    voltage: float | None,
+    daily_raw: dict[int, float],
+    monthly_raw: dict[int, float],
+) -> Usage:
+    """Assemble a Usage response from raw scalar readings and history maps.
+
+    Shared by the local (python-kasa) and cloud energy paths so both label and
+    round day/month history identically.
+    """
+    daily = [
+        UsageStat(label=str(day), kwh=round(kwh, 3))
+        for day, kwh in sorted(daily_raw.items())
+    ]
+    monthly = [
+        UsageStat(
+            label=_MONTHS[month - 1] if 1 <= month <= 12 else str(month),
+            kwh=round(kwh, 3),
+        )
+        for month, kwh in sorted(monthly_raw.items())
+    ]
+    return Usage(
+        device_id=device_id,
+        current_power_w=current_power_w,
+        today_kwh=today_kwh,
+        month_kwh=month_kwh,
+        voltage=voltage,
+        daily=daily,
+        monthly=monthly,
+    )
 
 
 def serialize_device(device: KasaDevice) -> Device:

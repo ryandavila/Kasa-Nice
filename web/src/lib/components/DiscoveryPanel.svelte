@@ -93,7 +93,7 @@
 				<Icon name="radar" size={16} class="text-faint" />
 				<input
 					bind:value={subnet}
-					placeholder="10.3.27.0/24"
+					placeholder="192.168.1.0/24"
 					aria-label="Subnet in CIDR notation"
 					class="w-full bg-transparent py-3 font-mono text-sm text-ink outline-none placeholder:text-faint"
 				/>
@@ -137,7 +137,7 @@
 				<input
 					bind:value={target}
 					inputmode="decimal"
-					placeholder="10.3.27.24"
+					placeholder="192.168.1.24"
 					aria-label="Device IP address"
 					class="w-full bg-transparent py-3 font-mono text-sm text-ink outline-none placeholder:text-faint"
 				/>

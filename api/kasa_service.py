@@ -99,7 +99,7 @@ class DeviceRegistry:
         # authenticate before discovery; None (no creds) leaves legacy plugs
         # working and is equivalent to omitting the argument.
         self._credentials = credentials
-        # Optional CIDR (e.g. "10.3.27.0/24") swept by unicast on startup and from
+        # Optional CIDR (e.g. "192.168.1.0/24") swept by unicast on startup and from
         # the Discovery tab — for devices on a separate subnet/VLAN that broadcast
         # discovery can't reach.
         self.scan_subnet = scan_subnet

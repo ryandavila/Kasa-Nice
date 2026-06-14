@@ -71,7 +71,7 @@ class DiscoverRequest(BaseModel):
 class SubnetScanRequest(BaseModel):
     subnet: str | None = Field(
         default=None,
-        description="CIDR subnet to sweep by unicast, e.g. '10.3.27.0/24'. "
+        description="CIDR subnet to sweep by unicast, e.g. '192.168.1.0/24'. "
         "Falls back to the server's KASA_SCAN_SUBNET when omitted.",
     )
 

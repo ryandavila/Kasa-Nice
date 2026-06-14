@@ -5,17 +5,21 @@ on your local network — no cloud account required.
 
 A **FastAPI** backend ([`api/`](api/)) talks to your devices via
 [python-kasa](https://github.com/python-kasa/python-kasa) and serves a
-**SvelteKit** single-page frontend ([`web/`](web/)) that polls for live state.
+**SvelteKit** single-page frontend ([`web/`](web/)) that streams live state.
 
 ## Features
 
 - 🏠 **Local control** — discover and control Kasa devices on your LAN, no cloud
-- ⚡ **Live state** — the UI polls device state, so changes made elsewhere (the
-  Kasa app, a physical switch) show up automatically
+- ⚡ **Live state** — the UI streams device state over Server-Sent Events, so
+  changes made elsewhere (the Kasa app, a physical switch) show up automatically
 - 🔧 **Full device support** — toggle plugs, dim, set bulb color, and control
   individual outlets on power strips
+- 🗂️ **Rooms & favorites** — group devices into rooms and star the ones you reach
+  for most; toggle between a by-type and a by-room view
 - 📊 **Energy monitoring** — live power draw plus daily/monthly usage charts for
   devices with an energy meter
+- 📈 **Energy history** — power and daily-usage trends recorded server-side over
+  time, retained beyond what each device remembers
 - 🔌 **Persistent discovery** — devices added by IP survive restarts
 - 🌗 **Light/dark theme** with an instant, no-flash toggle
 - 🐳 **Docker-ready** — one multi-stage image builds the frontend and serves it
@@ -62,6 +66,11 @@ All endpoints are under `/api`; interactive docs live at `http://localhost:8080/
 | `POST` | `/api/devices/{id}/color` | `{"hex": "#rrggbb"}` or `{"hsv": [h,s,v]}` |
 | `POST` | `/api/devices/{id}/children/{child}/power` | Toggle one outlet on a strip |
 | `GET`  | `/api/devices/{id}/usage` | Energy data (live power + daily/monthly history) |
+| `GET`  | `/api/devices/{id}/history` | Recorded history: recent power samples + persisted daily totals |
+| `GET`  | `/api/events` | Live device-state stream (Server-Sent Events) |
+| `GET` / `POST` | `/api/groups` | List rooms / create a room (`{"name": "..."}`) |
+| `PATCH` / `DELETE` | `/api/groups/{id}` | Rename or set a room's devices / delete it |
+| `GET` / `PUT` | `/api/favorites` | Read / set the starred device ids |
 
 ## Configuration
 
@@ -70,9 +79,12 @@ All endpoints are under `/api`; interactive docs live at `http://localhost:8080/
 | `KASA_HOST` | `127.0.0.1` (`0.0.0.0` in Docker) | Bind address for the server |
 | `KASA_PORT` | `8080` | Server port |
 | `KASA_STATE_FILE` | `data/known_devices.json` | Where known device hosts are persisted |
+| `KASA_GROUPS_FILE` | `data/groups.json` | Where rooms and favorites are persisted |
+| `KASA_ENERGY_HISTORY_FILE` | `data/energy_history.db` | SQLite database of recorded energy samples |
+| `KASA_ENERGY_SAMPLE_INTERVAL` | `300` | Seconds between energy-history samples (min `10`). Higher = fewer reads, coarser history |
 | `TPLINK_USERNAME` | _(unset)_ | TP-Link cloud email, required for newer SMART-protocol devices (e.g. KP125M) |
 | `TPLINK_PASSWORD` | _(unset)_ | TP-Link cloud password, paired with `TPLINK_USERNAME` |
-| `KASA_SCAN_SUBNET` | _(unset)_ | CIDR subnet (e.g. `10.3.27.0/24`) swept by unicast on startup and offered as the default in the Discovery tab |
+| `KASA_SCAN_SUBNET` | _(unset)_ | CIDR subnet (e.g. `192.168.1.0/24`) swept by unicast on startup and offered as the default in the Discovery tab |
 | `KASA_CLOUD_FALLBACK` | `0` | Set to `1` to control devices that no longer accept local auth (e.g. HS300 strips) via the TP-Link cloud — see below |
 | `KASA_CLOUD_MODELS` | `HS300` | Comma-separated model prefixes routed through the cloud when the fallback is on |
 | `KASA_CLOUD_POLL_INTERVAL` | `30` | Seconds between cloud-device state refreshes during the live poll (local devices refresh every poll). Higher = fewer TP-Link round-trips |

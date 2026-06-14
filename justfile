@@ -65,6 +65,15 @@ test:
 fix: format lint typecheck test
     @echo "All checks passed."
 
+# Verify formatting, lint, types, and tests without mutating files (used by CI)
+ci:
+    uv run ruff format --check .
+    uv run ruff check .
+    cd web && bun run lint
+    cd web && bun run check
+    uv run pytest
+    @echo "All checks passed."
+
 # --- Docker ---
 
 # Start application with Docker Compose

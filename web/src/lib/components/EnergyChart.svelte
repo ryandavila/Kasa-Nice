@@ -1,11 +1,21 @@
 <script lang="ts">
 	import type { UsageStat } from '$lib/api/types';
 
-	let { data, height = 128 }: { data: UsageStat[]; height?: number } = $props();
+	let {
+		data,
+		height = 128,
+		currency = '$'
+	}: { data: UsageStat[]; height?: number; currency?: string } = $props();
 
 	const max = $derived(Math.max(0, ...data.map((d) => d.kwh)));
 	// Label every bar when sparse, otherwise thin them out to avoid crowding.
 	const step = $derived(Math.max(1, Math.ceil(data.length / 8)));
+
+	// Append the flat-rate cost only when the backend supplied one for this bar.
+	function tip(d: UsageStat): string {
+		const base = `${d.label} · ${d.kwh.toFixed(2)} kWh`;
+		return d.cost == null ? base : `${base} · ${currency}${d.cost.toFixed(2)}`;
+	}
 </script>
 
 {#if data.length}
@@ -20,7 +30,7 @@
 				<div
 					class="pointer-events-none absolute -top-7 left-1/2 z-10 -translate-x-1/2 whitespace-nowrap rounded-md border border-line bg-surface px-2 py-1 font-mono text-[10px] text-ink opacity-0 shadow-sm transition-opacity group-hover:opacity-100"
 				>
-					{d.label} · {d.kwh.toFixed(2)} kWh
+					{tip(d)}
 				</div>
 			</div>
 		{/each}

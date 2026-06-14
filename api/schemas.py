@@ -33,6 +33,10 @@ class UsageStat(BaseModel):
 
     label: str
     kwh: float
+    cost: float | None = Field(
+        default=None,
+        description="Approximate cost (kWh × flat rate), or null when no rate is set.",
+    )
 
 
 class Usage(BaseModel):
@@ -42,6 +46,12 @@ class Usage(BaseModel):
     )
     today_kwh: float | None = None
     month_kwh: float | None = None
+    today_cost: float | None = Field(
+        default=None, description="today_kwh × flat rate, or null when no rate is set."
+    )
+    month_cost: float | None = Field(
+        default=None, description="month_kwh × flat rate, or null when no rate is set."
+    )
     voltage: float | None = None
     daily: list[UsageStat] = Field(
         default_factory=list, description="Energy per day for the current month."
@@ -72,6 +82,15 @@ class ServerConfig(BaseModel):
     scan_subnet: str | None = Field(
         default=None,
         description="Default CIDR the server sweeps, or null if unconfigured.",
+    )
+    energy_rate: float | None = Field(
+        default=None,
+        description="Flat cost per kWh applied to energy readings, or null if unset. "
+        "A flat-rate approximation — no tiered or time-of-use billing.",
+    )
+    energy_currency: str = Field(
+        default="$",
+        description="Currency symbol/prefix shown alongside energy cost.",
     )
 
 

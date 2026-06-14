@@ -75,6 +75,8 @@ All endpoints are under `/api`; interactive docs live at `http://localhost:8080/
 | `KASA_SCAN_SUBNET` | _(unset)_ | CIDR subnet (e.g. `10.3.27.0/24`) swept by unicast on startup and offered as the default in the Discovery tab |
 | `KASA_CLOUD_FALLBACK` | `0` | Set to `1` to control devices that no longer accept local auth (e.g. HS300 strips) via the TP-Link cloud — see below |
 | `KASA_CLOUD_MODELS` | `HS300` | Comma-separated model prefixes routed through the cloud when the fallback is on |
+| `KASA_ENERGY_RATE` | _(unset)_ | Flat cost per kWh (a number, e.g. `0.18`) used to show energy cost — see below. Leave unset to hide cost |
+| `KASA_ENERGY_CURRENCY` | `$` | Currency symbol/prefix shown before cost amounts |
 
 Newer Kasa devices use TP-Link's SMART protocol and authenticate before they
 can be discovered or controlled. Provide your TP-Link cloud credentials via a
@@ -96,6 +98,18 @@ just like local devices; their LAN IP is recovered from the MAC so they show the
 same `host`. Per-outlet energy is aggregated into a whole-strip total, using the
 device's own clock for "today"/"this month". Control round-trips to TP-Link's
 servers, so it's a little slower than local.
+
+### Energy cost (optional)
+
+Set `KASA_ENERGY_RATE` to your price per kWh (and optionally `KASA_ENERGY_CURRENCY`,
+default `$`) to show an estimated cost next to energy usage — for today, this
+month, and each bar in the charts. It applies globally to every device with an
+energy meter (the HS300 strips and KP125M plugs alike). When the rate is unset,
+all cost fields are null and the UI shows kWh only.
+
+> **Note:** this is a **flat-rate approximation** — a single price per kWh. It does
+> not model tiered pricing, time-of-use rates, fixed service charges, or taxes, so
+> treat the figures as a rough estimate, not a bill.
 
 Broadcast discovery only reaches devices on the server's own subnet — it can't
 cross VLAN boundaries. If your plugs live on a separate subnet (e.g. an isolated

@@ -75,6 +75,28 @@ def test_get_usage_returns_live_and_history():
     assert usage.monthly[1].kwh == 4.2
 
 
+def test_get_usage_cost_is_null_without_a_rate():
+    reg = DeviceRegistry()  # no energy rate configured
+    reg._devices = {"10.0.0.7": FakeDevice("10.0.0.7", has_energy=True)}
+    usage = asyncio.run(reg.get_usage("10.0.0.7"))
+    assert usage.today_cost is None
+    assert usage.month_cost is None
+    assert all(s.cost is None for s in usage.daily)
+    assert all(s.cost is None for s in usage.monthly)
+
+
+def test_get_usage_computes_cost_from_flat_rate():
+    reg = DeviceRegistry(energy_rate=0.2)
+    reg._devices = {"10.0.0.7": FakeDevice("10.0.0.7", has_energy=True)}
+    usage = asyncio.run(reg.get_usage("10.0.0.7"))
+    # today_kwh=0.3, month_kwh=4.2 (from FakeEnergy) × $0.2/kWh.
+    assert usage.today_cost == round(0.3 * 0.2, 2)
+    assert usage.month_cost == round(4.2 * 0.2, 2)
+    # Per-bar cost: daily {1: 0.1, 2: 0.25}; monthly {1: 1.0, 6: 4.2}.
+    assert usage.daily[0].cost == round(0.1 * 0.2, 2)
+    assert usage.monthly[1].cost == round(4.2 * 0.2, 2)
+
+
 def test_get_usage_unknown_device():
     with pytest.raises(DeviceNotFoundError):
         asyncio.run(DeviceRegistry().get_usage("nope"))

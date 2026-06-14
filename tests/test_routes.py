@@ -34,6 +34,23 @@ def test_health(client):
     assert client.get("/api/health").json() == {"status": "ok"}
 
 
+def test_config_defaults_have_no_energy_rate(client):
+    body = client.get("/api/config").json()
+    assert body["scan_subnet"] is None
+    assert body["energy_rate"] is None
+    assert body["energy_currency"] == "$"
+
+
+def test_config_exposes_configured_energy_rate(monkeypatch):
+    reg = DeviceRegistry(energy_rate=0.2, energy_currency="€")
+    monkeypatch.setattr(routes, "registry", reg)
+    app = FastAPI()
+    app.include_router(routes.router)
+    body = TestClient(app).get("/api/config").json()
+    assert body["energy_rate"] == 0.2
+    assert body["energy_currency"] == "€"
+
+
 def test_list_devices(client):
     body = client.get("/api/devices").json()
     assert {d["id"] for d in body} == {"10.0.0.1", "10.0.0.2", "10.0.0.3", "10.0.0.4"}

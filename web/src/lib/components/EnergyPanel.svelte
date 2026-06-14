@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import type { Usage } from '$lib/api/types';
-	import { getUsage, ApiError } from '$lib/api/client';
+	import { getUsage, getConfig, ApiError } from '$lib/api/client';
 	import { deviceStore } from '$lib/stores/devices.svelte';
 	import Icon from './Icon.svelte';
 	import EnergyChart from './EnergyChart.svelte';
@@ -11,6 +11,11 @@
 	let usage = $state<Record<string, Usage>>({});
 	let errors = $state<Record<string, string>>({});
 	let loading = $state<Record<string, boolean>>({});
+
+	// Global flat $/kWh rate used to show money cost alongside kWh. The cost is a
+	// flat-rate approximation (no tiered/time-of-use billing) computed server-side.
+	let energyRate = $state<number | null>(null);
+	let currency = $state('$');
 
 	async function loadOne(id: string) {
 		loading[id] = true;
@@ -28,10 +33,24 @@
 		for (const m of meters) loadOne(m.id);
 	}
 
-	onMount(loadAll);
+	onMount(() => {
+		loadAll();
+		getConfig()
+			.then((cfg) => {
+				energyRate = cfg.energy_rate;
+				currency = cfg.energy_currency || '$';
+			})
+			.catch(() => {
+				// config is best-effort; cost display just stays hidden
+			});
+	});
 
 	function fmt(v: number | null, digits = 2): string {
 		return v == null ? '—' : v.toFixed(digits);
+	}
+
+	function fmtMoney(v: number | null): string {
+		return v == null ? '—' : currency + v.toFixed(2);
 	}
 </script>
 
@@ -82,12 +101,15 @@
 				{:else}
 					<!-- live readouts -->
 					<dl class="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
-						{#each [{ k: 'Now', v: fmt(u.current_power_w, 1), unit: 'W' }, { k: 'Today', v: fmt(u.today_kwh), unit: 'kWh' }, { k: 'This month', v: fmt(u.month_kwh), unit: 'kWh' }, { k: 'Voltage', v: fmt(u.voltage, 0), unit: 'V' }] as s (s.k)}
+						{#each [{ k: 'Now', v: fmt(u.current_power_w, 1), unit: 'W', cost: null }, { k: 'Today', v: fmt(u.today_kwh), unit: 'kWh', cost: u.today_cost }, { k: 'This month', v: fmt(u.month_kwh), unit: 'kWh', cost: u.month_cost }, { k: 'Voltage', v: fmt(u.voltage, 0), unit: 'V', cost: null }] as s (s.k)}
 							<div class="rounded-xl border border-line bg-raised/50 px-3 py-2.5">
 								<dt class="text-[11px] uppercase tracking-wide text-faint">{s.k}</dt>
 								<dd class="mt-0.5 font-display text-xl font-semibold text-ink">
 									{s.v}<span class="ml-1 text-xs font-normal text-muted">{s.unit}</span>
 								</dd>
+								{#if energyRate != null && s.cost != null}
+									<dd class="mt-0.5 font-mono text-xs text-muted">{fmtMoney(s.cost)}</dd>
+								{/if}
 							</div>
 						{/each}
 					</dl>
@@ -99,7 +121,7 @@
 							>
 								This month · daily
 							</h4>
-							<EnergyChart data={u.daily} />
+							<EnergyChart data={u.daily} {currency} />
 						</div>
 						<div>
 							<h4
@@ -107,7 +129,7 @@
 							>
 								This year · monthly
 							</h4>
-							<EnergyChart data={u.monthly} />
+							<EnergyChart data={u.monthly} {currency} />
 						</div>
 					</div>
 				{/if}

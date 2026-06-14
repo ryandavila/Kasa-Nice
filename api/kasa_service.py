@@ -75,6 +75,8 @@ class DeviceRegistry:
         cloud_client: KasaCloudClient | None = None,
         cloud_models: tuple[str, ...] = (),
         scan_subnet: str | None = None,
+        energy_rate: float | None = None,
+        energy_currency: str = "$",
     ) -> None:
         self._devices: dict[str, KasaDevice] = {}
         # Devices controlled through the TP-Link cloud (e.g. HS300 strips whose
@@ -93,6 +95,11 @@ class DeviceRegistry:
         # the Discovery tab — for devices on a separate subnet/VLAN that broadcast
         # discovery can't reach.
         self.scan_subnet = scan_subnet
+        # Optional flat $/kWh rate (and its currency prefix) for showing energy
+        # cost. A flat-rate APPROXIMATION — no tiered or time-of-use billing.
+        # When energy_rate is None, cost fields stay null and nothing changes.
+        self.energy_rate = energy_rate
+        self.energy_currency = energy_currency
         # Hosts that answered discovery but couldn't be read (failed auth). Unlike
         # genuinely-offline hosts, these respond — so they're candidates for cloud
         # control, and we surface a hint about them when the fallback is off.
@@ -423,7 +430,7 @@ class DeviceRegistry:
         # Cloud devices meter per outlet and expose a ready-made summary.
         summary = getattr(device, "energy_summary", None)
         if summary is not None:
-            return _build_usage(device.host, **await summary())
+            return _build_usage(device.host, rate=self.energy_rate, **await summary())
 
         energy = device.modules.get(Module.Energy)
         if energy is None:
@@ -456,6 +463,7 @@ class DeviceRegistry:
             voltage=_safe("voltage"),
             daily_raw=daily_raw,
             monthly_raw=monthly_raw,
+            rate=self.energy_rate,
         )
 
     async def set_child_power(
@@ -470,6 +478,18 @@ class DeviceRegistry:
         raise DeviceNotFoundError(f"{device_id}/{child_id}")
 
 
+def _cost(kwh: float | None, rate: float | None) -> float | None:
+    """Money cost of ``kwh`` at a flat ``rate`` per kWh, rounded to cents.
+
+    A flat-rate APPROXIMATION — it ignores tiered and time-of-use billing.
+    Returns None when either the reading or the rate is absent, so cost fields
+    simply stay null when no KASA_ENERGY_RATE is configured.
+    """
+    if kwh is None or rate is None:
+        return None
+    return round(kwh * rate, 2)
+
+
 def _build_usage(
     device_id: str,
     *,
@@ -479,20 +499,23 @@ def _build_usage(
     voltage: float | None,
     daily_raw: dict[int, float],
     monthly_raw: dict[int, float],
+    rate: float | None = None,
 ) -> Usage:
     """Assemble a Usage response from raw scalar readings and history maps.
 
-    Shared by the local (python-kasa) and cloud energy paths so both label and
-    round day/month history identically.
+    Shared by the local (python-kasa) and cloud energy paths so both label,
+    round, and cost day/month history identically. ``rate`` is the optional
+    flat $/kWh rate; when None, every cost field is null.
     """
     daily = [
-        UsageStat(label=str(day), kwh=round(kwh, 3))
+        UsageStat(label=str(day), kwh=(k := round(kwh, 3)), cost=_cost(k, rate))
         for day, kwh in sorted(daily_raw.items())
     ]
     monthly = [
         UsageStat(
             label=_MONTHS[month - 1] if 1 <= month <= 12 else str(month),
-            kwh=round(kwh, 3),
+            kwh=(k := round(kwh, 3)),
+            cost=_cost(k, rate),
         )
         for month, kwh in sorted(monthly_raw.items())
     ]
@@ -501,6 +524,8 @@ def _build_usage(
         current_power_w=current_power_w,
         today_kwh=today_kwh,
         month_kwh=month_kwh,
+        today_cost=_cost(today_kwh, rate),
+        month_cost=_cost(month_kwh, rate),
         voltage=voltage,
         daily=daily,
         monthly=monthly,
@@ -560,6 +585,21 @@ def _load_credentials() -> Credentials | None:
     return None
 
 
+def _load_energy_rate() -> float | None:
+    """Parse the optional flat $/kWh rate (KASA_ENERGY_RATE) from the environment.
+
+    Returns None (cost display off) when unset or not a valid number.
+    """
+    raw = os.getenv("KASA_ENERGY_RATE")
+    if raw is None or not raw.strip():
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        logger.warning(f"Ignoring invalid KASA_ENERGY_RATE={raw!r}; expected a number")
+        return None
+
+
 # Module-level singleton shared across requests. The host store lives at
 # KASA_STATE_FILE (default ./data/known_devices.json); mount that path as a
 # volume to keep manually-added devices across container rebuilds.
@@ -571,4 +611,6 @@ registry = DeviceRegistry(
     cloud_client=_cloud[0] if _cloud else None,
     cloud_models=_cloud[1] if _cloud else (),
     scan_subnet=os.getenv("KASA_SCAN_SUBNET"),
+    energy_rate=_load_energy_rate(),
+    energy_currency=os.getenv("KASA_ENERGY_CURRENCY", "$"),
 )

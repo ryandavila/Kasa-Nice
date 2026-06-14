@@ -36,12 +36,18 @@ export interface Device {
 export interface UsageStat {
 	label: string;
 	kwh: number;
+	/** Flat-rate cost (kWh × rate); null when no rate is configured. */
+	cost: number | null;
 }
 
 /** Server-side configuration the UI needs (e.g. the default subnet to sweep). */
 export interface ServerConfig {
 	/** CIDR the server sweeps by unicast, or null if unconfigured. */
 	scan_subnet: string | null;
+	/** Global flat $/kWh rate in currency units, or null when unset. */
+	energy_rate: number | null;
+	/** Currency symbol for cost display, e.g. "$" (default "$"). */
+	energy_currency: string;
 }
 
 export interface Usage {
@@ -50,6 +56,10 @@ export interface Usage {
 	current_power_w: number | null;
 	today_kwh: number | null;
 	month_kwh: number | null;
+	/** Flat-rate cost for today's energy; null when no rate is configured. */
+	today_cost: number | null;
+	/** Flat-rate cost for the month's energy; null when no rate is configured. */
+	month_cost: number | null;
 	voltage: number | null;
 	/** Energy per day for the current month. */
 	daily: UsageStat[];

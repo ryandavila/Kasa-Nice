@@ -1,4 +1,13 @@
-import type { Device, Hsv, ServerConfig, ServerStatus, Usage } from './types';
+import type {
+	Device,
+	EnergyHistory,
+	Favorites,
+	Group,
+	Hsv,
+	ServerConfig,
+	ServerStatus,
+	Usage
+} from './types';
 
 /**
  * Thin client for the Kasa-Nice FastAPI backend. Paths are relative so the same
@@ -40,6 +49,18 @@ function post<T>(path: string, body?: unknown): Promise<T> {
 	return request<T>(path, { method: 'POST', body: body ? JSON.stringify(body) : undefined });
 }
 
+function patch<T>(path: string, body: unknown): Promise<T> {
+	return request<T>(path, { method: 'PATCH', body: JSON.stringify(body) });
+}
+
+function put<T>(path: string, body: unknown): Promise<T> {
+	return request<T>(path, { method: 'PUT', body: JSON.stringify(body) });
+}
+
+function del(path: string): Promise<void> {
+	return request<void>(path, { method: 'DELETE' });
+}
+
 /** Devices discovered at startup / cached by the backend. */
 export const listDevices = () => request<Device[]>('/devices');
 
@@ -77,3 +98,23 @@ export const setChildPower = (id: string, childId: string, on: boolean) =>
 	post<Device>(`/devices/${encodeURIComponent(id)}/children/${encodeURIComponent(childId)}/power`, {
 		on
 	});
+
+/** Persisted energy history (recent power samples + daily totals) for a device. */
+export const getHistory = (id: string, hours = 24, days = 30) =>
+	request<EnergyHistory>(`/devices/${encodeURIComponent(id)}/history?hours=${hours}&days=${days}`);
+
+// ── Groups (rooms) & favorites ──────────────────────────────────────────────
+
+export const listGroups = () => request<Group[]>('/groups');
+
+export const createGroup = (name: string) => post<Group>('/groups', { name });
+
+export const updateGroup = (id: string, patch_: { name?: string; device_ids?: string[] }) =>
+	patch<Group>(`/groups/${encodeURIComponent(id)}`, patch_);
+
+export const deleteGroup = (id: string) => del(`/groups/${encodeURIComponent(id)}`);
+
+export const getFavorites = () => request<Favorites>('/favorites');
+
+export const setFavorites = (deviceIds: string[]) =>
+	put<Favorites>('/favorites', { device_ids: deviceIds });

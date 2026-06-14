@@ -2,14 +2,30 @@
 	import { onMount } from 'svelte';
 	import type { DeviceType } from '$lib/api/types';
 	import { deviceStore, TYPE_ORDER } from '$lib/stores/devices.svelte';
+	import { groupStore } from '$lib/stores/groups.svelte';
 	import Icon from '$lib/components/Icon.svelte';
 	import DeviceCard from '$lib/components/DeviceCard.svelte';
 	import DiscoveryPanel from '$lib/components/DiscoveryPanel.svelte';
 	import EnergyPanel from '$lib/components/EnergyPanel.svelte';
+	import RoomsView from '$lib/components/RoomsView.svelte';
 	import ThemeToggle from '$lib/components/ThemeToggle.svelte';
 
 	type Tab = 'devices' | 'energy' | 'discovery';
 	let tab = $state<Tab>('devices');
+
+	// How the Devices tab groups cards: by device type (default) or by user room.
+	// Persisted so the choice survives reloads.
+	type Grouping = 'type' | 'room';
+	let grouping = $state<Grouping>('type');
+
+	function setGrouping(g: Grouping) {
+		grouping = g;
+		try {
+			localStorage.setItem('kasa-grouping', g);
+		} catch {
+			// private mode / storage disabled — the choice just won't persist
+		}
+	}
 
 	const LABELS: Record<DeviceType, string> = {
 		Bulb: 'Bulbs',
@@ -35,23 +51,28 @@
 	const loading = $derived(deviceStore.status === 'loading');
 
 	onMount(() => {
-		deviceStore.load();
-		deviceStore.startPolling();
+		const saved = localStorage.getItem('kasa-grouping');
+		if (saved === 'room' || saved === 'type') grouping = saved;
 
-		// Pause polling while the tab is hidden; resume with an immediate refresh.
+		deviceStore.load();
+		deviceStore.startLiveUpdates();
+		groupStore.load();
+
+		// Drop the live stream while the tab is hidden; resume with an immediate
+		// refresh so the UI is correct the moment it's visible again.
 		const onVisibility = () => {
 			if (document.hidden) {
-				deviceStore.stopPolling();
+				deviceStore.stopLiveUpdates();
 			} else {
 				deviceStore.refresh();
-				deviceStore.startPolling();
+				deviceStore.startLiveUpdates();
 			}
 		};
 		document.addEventListener('visibilitychange', onVisibility);
 
 		return () => {
 			document.removeEventListener('visibilitychange', onVisibility);
-			deviceStore.stopPolling();
+			deviceStore.stopLiveUpdates();
 		};
 	});
 </script>
@@ -190,24 +211,48 @@
 					Still scanning the network — more devices may appear.
 				</div>
 			{/if}
-			<div class="space-y-10">
-				{#each groups as group (group.type)}
-					<section>
-						<div class="mb-4 flex items-baseline gap-3">
-							<h2 class="font-display text-sm font-semibold uppercase tracking-[0.18em] text-muted">
-								{group.label}
-							</h2>
-							<span class="h-px grow bg-line"></span>
-							<span class="font-mono text-xs text-faint">{group.devices.length}</span>
-						</div>
-						<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-							{#each group.devices as device, i (device.id)}
-								<DeviceCard {device} delay={i * 45} />
-							{/each}
-						</div>
-					</section>
+
+			<!-- Group cards by device type or by user-defined room. -->
+			<div class="mb-6 inline-flex rounded-full border border-line bg-surface/70 p-1">
+				{#each [{ id: 'type', label: 'By type' }, { id: 'room', label: 'By room' }] as g (g.id)}
+					<button
+						type="button"
+						onclick={() => setGrouping(g.id as Grouping)}
+						class="relative rounded-full px-4 py-1.5 text-xs font-medium transition-colors
+							{grouping === g.id ? 'text-[#04201f]' : 'text-muted hover:text-ink'}"
+					>
+						{#if grouping === g.id}
+							<span class="absolute inset-0 rounded-full bg-accent"></span>
+						{/if}
+						<span class="relative">{g.label}</span>
+					</button>
 				{/each}
 			</div>
+
+			{#if grouping === 'room'}
+				<RoomsView />
+			{:else}
+				<div class="space-y-10">
+					{#each groups as group (group.type)}
+						<section>
+							<div class="mb-4 flex items-baseline gap-3">
+								<h2
+									class="font-display text-sm font-semibold uppercase tracking-[0.18em] text-muted"
+								>
+									{group.label}
+								</h2>
+								<span class="h-px grow bg-line"></span>
+								<span class="font-mono text-xs text-faint">{group.devices.length}</span>
+							</div>
+							<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+								{#each group.devices as device, i (device.id)}
+									<DeviceCard {device} delay={i * 45} />
+								{/each}
+							</div>
+						</section>
+					{/each}
+				</div>
+			{/if}
 		{/if}
 	{:else if tab === 'energy'}
 		<EnergyPanel />

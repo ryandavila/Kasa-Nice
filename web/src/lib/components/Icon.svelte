@@ -14,7 +14,14 @@
 		| 'droplet'
 		| 'bolt'
 		| 'chart'
-		| 'search';
+		| 'search'
+		| 'star'
+		| 'star-filled'
+		| 'home'
+		| 'plus'
+		| 'pencil'
+		| 'trash'
+		| 'x';
 
 	// 24×24 stroke icons. Each entry is the inner markup of an <svg>.
 	const PATHS: Record<IconName, string> = {
@@ -37,7 +44,15 @@
 		droplet: '<path d="M12 3.5s6 6.3 6 10.5a6 6 0 0 1-12 0c0-4.2 6-10.5 6-10.5Z"/>',
 		bolt: '<path d="M13 2 4 14h7l-1 8 9-12h-7l1-8Z"/>',
 		chart: '<path d="M4 20V4m16 16H4m4-2V11m5 7V7m5 11v-5"/>',
-		search: '<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>'
+		search: '<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>',
+		star: '<path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8L4.5 9.7l5.9-.9L12 3.5Z"/>',
+		'star-filled':
+			'<path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8L4.5 9.7l5.9-.9L12 3.5Z" fill="currentColor"/>',
+		home: '<path d="M4 11l8-7 8 7M6 10v9a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-9"/>',
+		plus: '<path d="M12 5v14M5 12h14"/>',
+		pencil: '<path d="M4 20h4l10-10-4-4L4 16v4Zm9-13 4 4"/>',
+		trash: '<path d="M4 7h16M9 7V4h6v3m-7 0v13h8V7M10 11v6m4-6v6"/>',
+		x: '<path d="M6 6l12 12M18 6 6 18"/>'
 	};
 
 	export const ICONS = PATHS;

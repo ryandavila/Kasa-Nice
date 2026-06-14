@@ -36,6 +36,10 @@ class DeviceStore {
 
 	private pollTimer: ReturnType<typeof setInterval> | null = null;
 	private discoveryTimer: ReturnType<typeof setTimeout> | null = null;
+	/** Server-Sent Events stream of live state; falls back to polling on failure. */
+	private events: EventSource | null = null;
+	/** Whether the SSE stream has delivered at least one frame this session. */
+	private gotStreamFrame = false;
 
 	get isEmpty() {
 		return this.status === 'ready' && this.devices.length === 0;
@@ -130,7 +134,50 @@ class DeviceStore {
 		}
 	}
 
-	/** Begin polling live device state. Idempotent. */
+	/**
+	 * Subscribe to live state. Prefers a single Server-Sent Events stream (the
+	 * server pushes whenever it re-reads hardware); falls back to interval polling
+	 * when EventSource is unavailable or the stream can't be established (e.g. a
+	 * proxy that buffers it). Idempotent.
+	 */
+	startLiveUpdates() {
+		if (typeof EventSource === 'undefined') {
+			this.startPolling();
+			return;
+		}
+		if (this.events) return;
+		this.gotStreamFrame = false;
+		const es = new EventSource('/api/events');
+		this.events = es;
+		es.onmessage = (e) => {
+			this.gotStreamFrame = true;
+			this.stopPolling(); // the stream works; drop any fallback poll
+			try {
+				this.merge(JSON.parse(e.data) as Device[]);
+				this.live = true;
+			} catch {
+				// ignore a malformed frame; the next one recovers
+			}
+		};
+		es.onerror = () => {
+			// EventSource reconnects on its own; reflect the drop in the meantime.
+			// If we never received a single frame, the stream is likely blocked, so
+			// fall back to polling to keep the UI live.
+			this.live = false;
+			if (!this.gotStreamFrame) this.startPolling();
+		};
+	}
+
+	/** Tear down the live stream and any fallback poll. */
+	stopLiveUpdates() {
+		if (this.events) {
+			this.events.close();
+			this.events = null;
+		}
+		this.stopPolling();
+	}
+
+	/** Begin polling live device state (SSE fallback). Idempotent. */
 	startPolling(intervalMs = 5000) {
 		if (this.pollTimer) return;
 		this.pollTimer = setInterval(() => {

@@ -1,16 +1,27 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import type { Usage } from '$lib/api/types';
-	import { getUsage, getConfig, ApiError } from '$lib/api/client';
+	import type { EnergyHistory, Usage, UsageStat } from '$lib/api/types';
+	import { getUsage, getHistory, getConfig, ApiError } from '$lib/api/client';
 	import { deviceStore } from '$lib/stores/devices.svelte';
 	import Icon from './Icon.svelte';
 	import EnergyChart from './EnergyChart.svelte';
+	import PowerSparkline from './PowerSparkline.svelte';
 
 	const meters = $derived(deviceStore.devices.filter((d) => d.has_emeter));
 
 	let usage = $state<Record<string, Usage>>({});
+	let history = $state<Record<string, EnergyHistory>>({});
 	let errors = $state<Record<string, string>>({});
 	let loading = $state<Record<string, boolean>>({});
+
+	// Persisted daily totals as chart bars; label the ISO date as a short M/D.
+	function dailyBars(h: EnergyHistory | undefined): UsageStat[] {
+		if (!h) return [];
+		return h.daily.map((d) => {
+			const [, m, day] = d.date.split('-');
+			return { label: `${Number(m)}/${Number(day)}`, kwh: d.kwh, cost: d.cost };
+		});
+	}
 
 	// Global flat $/kWh rate used to show money cost alongside kWh. The cost is a
 	// flat-rate approximation (no tiered/time-of-use billing) computed server-side.
@@ -26,6 +37,13 @@
 			errors[id] = e instanceof ApiError ? e.message : 'Failed to read energy data';
 		} finally {
 			loading[id] = false;
+		}
+		// Recorded history is supplementary — load it separately so a gap here
+		// never blocks the live readouts above.
+		try {
+			history[id] = await getHistory(id);
+		} catch {
+			// no history yet (or the recorder hasn't sampled this device); skip
 		}
 	}
 
@@ -141,6 +159,39 @@
 							<EnergyChart data={u.monthly} {currency} />
 						</div>
 					</div>
+
+					<!-- Recorded history: persisted beyond what the device itself remembers. -->
+					{@const h = history[device.id]}
+					{#if h && (h.samples.length > 1 || h.daily.length)}
+						<div class="mt-6 border-t border-line pt-6">
+							<div class="mb-4 flex items-center gap-2">
+								<Icon name="chart" size={14} class="text-faint" />
+								<span
+									class="font-display text-xs font-semibold uppercase tracking-[0.18em] text-muted"
+								>
+									Recorded history
+								</span>
+							</div>
+							<div class="grid gap-6 lg:grid-cols-2">
+								<div>
+									<h4
+										class="mb-3 font-display text-xs font-semibold uppercase tracking-[0.18em] text-muted"
+									>
+										Last 24h · power
+									</h4>
+									<PowerSparkline samples={h.samples} />
+								</div>
+								<div>
+									<h4
+										class="mb-3 font-display text-xs font-semibold uppercase tracking-[0.18em] text-muted"
+									>
+										Last 30 days · daily
+									</h4>
+									<EnergyChart data={dailyBars(h)} {currency} />
+								</div>
+							</div>
+						</div>
+					{/if}
 				{/if}
 			</section>
 		{/each}

@@ -74,3 +74,36 @@ export interface Usage {
 	/** Energy per month for the current year. */
 	monthly: UsageStat[];
 }
+
+/** A user-defined room: a named, ordered set of device ids. */
+export interface Group {
+	id: string;
+	name: string;
+	device_ids: string[];
+}
+
+/** The device ids the user has starred for quick access. */
+export interface Favorites {
+	device_ids: string[];
+}
+
+/** One persisted power reading: unix epoch seconds and watts (null if unread). */
+export interface EnergySample {
+	ts: number;
+	power_w: number | null;
+}
+
+/** A persisted day's total energy (and optional flat-rate cost). */
+export interface DailyEnergy {
+	/** Local date, ISO 'YYYY-MM-DD'. */
+	date: string;
+	kwh: number;
+	cost: number | null;
+}
+
+/** Recorded history for a device: recent power samples and daily totals. */
+export interface EnergyHistory {
+	device_id: string;
+	samples: EnergySample[];
+	daily: DailyEnergy[];
+}

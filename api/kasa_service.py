@@ -92,6 +92,10 @@ class DeviceRegistry:
         # the Discovery tab — for devices on a separate subnet/VLAN that broadcast
         # discovery can't reach.
         self.scan_subnet = scan_subnet
+        # Hosts that answered discovery but couldn't be read (failed auth). Unlike
+        # genuinely-offline hosts, these respond — so they're candidates for cloud
+        # control, and we surface a hint about them when the fallback is off.
+        self._unreadable_hosts: set[str] = set()
 
     async def _refresh(self, device: KasaDevice) -> bool:
         """Pull live state. Returns False if the device couldn't be read.
@@ -129,7 +133,9 @@ class DeviceRegistry:
         for device in response.values():
             if await self._refresh(device):
                 self._devices[device.host] = device
+                self._unreadable_hosts.discard(device.host)
             else:
+                self._unreadable_hosts.add(device.host)
                 logger.warning(
                     f"Known host {device.host} answered but could not be read "
                     "(bad credentials or offline); not serving it"
@@ -139,9 +145,13 @@ class DeviceRegistry:
         """Broadcast-discover devices on the local network and cache them."""
         logger.info("Starting device discovery")
         discovered = await Discover.discover(credentials=self._credentials)
-        self._devices = {
-            d.host: d for d in discovered.values() if await self._refresh(d)
-        }
+        self._unreadable_hosts = set()
+        self._devices = {}
+        for d in discovered.values():
+            if await self._refresh(d):
+                self._devices[d.host] = d
+            else:
+                self._unreadable_hosts.add(d.host)
 
         # Re-attach known hosts that broadcast discovery didn't reach.
         if self._store is not None:
@@ -155,15 +165,15 @@ class DeviceRegistry:
     async def discover_target(self, target: str) -> list[KasaDevice]:
         """Probe a single IP (or broadcast address) and merge results in."""
         logger.info(f"Discovering target {target}")
-        response = await Discover.discover(
-            target=target, credentials=self._credentials
-        )
+        response = await Discover.discover(target=target, credentials=self._credentials)
         found: list[KasaDevice] = []
         for device in response.values():
             if await self._refresh(device):
                 self._devices[device.host] = device
+                self._unreadable_hosts.discard(device.host)
                 found.append(device)
             else:
+                self._unreadable_hosts.add(device.host)
                 logger.warning(
                     f"Device at {device.host} answered but could not be read "
                     "(bad credentials or offline)"
@@ -202,7 +212,10 @@ class DeviceRegistry:
                     return
                 if await self._refresh(device):
                     self._devices[device.host] = device
+                    self._unreadable_hosts.discard(device.host)
                     found.append(device)
+                else:
+                    self._unreadable_hosts.add(device.host)
 
         await asyncio.gather(*(probe(h) for h in hosts))
         logger.info(f"Subnet sweep of {subnet} found {len(found)} devices")
@@ -283,6 +296,24 @@ class DeviceRegistry:
 
         await asyncio.gather(*(probe(h) for h in unresolved))
         return result
+
+    def log_cloud_fallback_hint(self) -> None:
+        """Nudge the user toward cloud control when it's off but would help.
+
+        Logged only when the fallback is disabled and devices answered discovery
+        yet failed local auth — the exact signature of a device (e.g. an HS300)
+        whose firmware dropped local control. No-op when cloud control is already
+        configured.
+        """
+        if self._cloud_client is not None or not self._unreadable_hosts:
+            return
+        hosts = ", ".join(sorted(self._unreadable_hosts))
+        logger.warning(
+            f"{len(self._unreadable_hosts)} known device(s) responded but failed "
+            f"local authentication ({hosts}). If these dropped local control "
+            "(e.g. HS300 strips), set KASA_CLOUD_FALLBACK=1 to control them via "
+            "the TP-Link cloud."
+        )
 
     async def aclose(self) -> None:
         """Release external resources (the cloud HTTP session)."""

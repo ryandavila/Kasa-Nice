@@ -28,6 +28,7 @@ async def lifespan(app: FastAPI):
         # After local discovery, so cloud devices already reachable locally are
         # skipped and the rest can be paired with their LAN IPs.
         await registry.attach_cloud()
+        registry.log_cloud_fallback_hint()
     except Exception as e:  # noqa: BLE001 - never block startup on discovery
         logger.error(f"Initial discovery failed: {e}")
     yield

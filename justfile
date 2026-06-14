@@ -61,8 +61,12 @@ typecheck:
 test:
     uv run pytest
 
+# Run the frontend unit tests with vitest
+web-test:
+    cd web && bun run test:run
+
 # Format, lint, type-check, and test everything
-fix: format lint typecheck test
+fix: format lint typecheck test web-test
     @echo "All checks passed."
 
 # Verify formatting, lint, types, and tests without mutating files (used by CI)
@@ -71,6 +75,7 @@ ci:
     uv run ruff check .
     cd web && bun run lint
     cd web && bun run check
+    cd web && bun run test:run
     uv run pytest
     @echo "All checks passed."
 

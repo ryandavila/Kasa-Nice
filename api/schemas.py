@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field, field_validator
 
 Hsv = tuple[int, int, int]
@@ -213,6 +215,111 @@ class Favorites(BaseModel):
     """The device ids the user has starred for quick access."""
 
     device_ids: list[str] = Field(default_factory=list)
+
+
+# ── Schedules (timers) ────────────────────────────────────────────────────────
+
+# 0=Monday … 6=Sunday, matching Python's ``datetime.weekday()`` so the scheduler
+# can compare a rule's days directly against the local clock with no remapping.
+# The frontend presents a Mon–Sun picker over these same integers.
+_HHMM = r"^([01]\d|2[0-3]):[0-5]\d$"
+
+
+def _normalize_days(days: list[int]) -> list[int]:
+    """Validate weekday ints and normalise to a sorted, de-duplicated list.
+
+    JSON has no set type, so "set of ints" is persisted as a canonical list. A
+    rule with no days would never fire (almost certainly a mistake), so at least
+    one is required. Shared by the create/read/update schemas so they agree.
+    """
+    if not days:
+        raise ValueError("at least one weekday is required")
+    if any(d < 0 or d > 6 for d in days):
+        raise ValueError("weekdays must be between 0 (Monday) and 6 (Sunday)")
+    return sorted(set(days))
+
+
+class ScheduleTarget(BaseModel):
+    """What a rule acts on: a single device, or a whole room (group).
+
+    A discriminated ``{type, id}`` rather than two optional id fields, so adding
+    a future target kind stays a one-line ``Literal`` extension and can't produce
+    an ambiguous "both set / neither set" payload.
+    """
+
+    type: Literal["device", "room"]
+    id: str = Field(min_length=1, description="Device id or group id, per ``type``.")
+
+
+class LastFired(BaseModel):
+    """Audit note for a rule's most recent firing (server-written, read-only)."""
+
+    ts: int = Field(description="Unix epoch seconds of the last firing attempt.")
+    result: str = Field(
+        description="Human-readable outcome, e.g. 'ok' or 'partial: 1 failed'."
+    )
+
+
+class Schedule(BaseModel):
+    """A fixed-time rule: at ``time`` on ``days``, apply ``action`` to ``target``.
+
+    The ``kind`` discriminator is fixed to ``"fixed_time"`` in v1. It exists so
+    later rule kinds (sunrise/sunset, one-shot timers) can be added as new
+    ``kind`` values without reshaping — or breaking the deserialization of —
+    existing v1 rules. Likewise ``action`` is a string enum today; a future
+    brightness/colour action would arrive as an additional value, leaving on/off
+    rules untouched.
+    """
+
+    id: str
+    kind: Literal["fixed_time"] = "fixed_time"
+    enabled: bool = True
+    time: str = Field(pattern=_HHMM, description="Local wall-clock time, 'HH:MM'.")
+    days: list[int] = Field(
+        description="Weekdays the rule fires on; 0=Monday … 6=Sunday."
+    )
+    target: ScheduleTarget
+    action: Literal["on", "off"]
+    # Server-written; null until the rule first fires. Optional so older files
+    # (and freshly-created rules) load without it.
+    last_fired: LastFired | None = None
+
+    @field_validator("days")
+    @classmethod
+    def _validate_days(cls, days: list[int]) -> list[int]:
+        return _normalize_days(days)
+
+
+class ScheduleCreate(BaseModel):
+    """Fields a client supplies to create a rule; server assigns id/last_fired."""
+
+    kind: Literal["fixed_time"] = "fixed_time"
+    enabled: bool = True
+    time: str = Field(pattern=_HHMM)
+    days: list[int]
+    target: ScheduleTarget
+    action: Literal["on", "off"]
+
+    @field_validator("days")
+    @classmethod
+    def _validate_days(cls, days: list[int]) -> list[int]:
+        return _normalize_days(days)
+
+
+class ScheduleUpdate(BaseModel):
+    """Partial update of a rule; every field is optional (omitted = unchanged)."""
+
+    enabled: bool | None = None
+    time: str | None = Field(default=None, pattern=_HHMM)
+    days: list[int] | None = None
+    target: ScheduleTarget | None = None
+    action: Literal["on", "off"] | None = None
+
+    @field_validator("days")
+    @classmethod
+    def _validate_days(cls, days: list[int] | None) -> list[int] | None:
+        # Same rule as the other schemas, but tolerate the field being omitted.
+        return None if days is None else _normalize_days(days)
 
 
 # ── Persisted energy history ────────────────────────────────────────────────

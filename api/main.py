@@ -10,10 +10,14 @@ from fastapi.responses import FileResponse
 
 from .config import get_settings
 from .energy_history import history, load_sample_interval, run_recorder
+from .events import broadcaster
 from .events import router as events_router
+from .group_store import groups
 from .kasa_service import registry
 from .logging_config import get_logger, setup_logging
 from .routes import router
+from .schedule_store import schedules
+from .scheduler import run_scheduler
 
 logger = get_logger(__name__)
 
@@ -37,7 +41,8 @@ async def lifespan(app: FastAPI):
         # network. One of them flips its state on every read, so the SSE stream's
         # periodic re-reads surface a server-initiated change the browser never
         # triggered — the live-update case the smoke test asserts. The energy
-        # recorder is skipped to keep the fake run hermetic (no history writes).
+        # recorder and scheduler are skipped to keep the fake run hermetic (no
+        # history or schedule-state writes).
         from .testing.fake_devices import seed_registry
 
         logger.warning("KASA_FAKE_DEVICES set; serving in-process fake devices")
@@ -54,7 +59,13 @@ async def lifespan(app: FastAPI):
         recorder = asyncio.create_task(
             run_recorder(registry, history, load_sample_interval())
         )
-        tasks = (discovery, recorder)
+        # Fire server-side schedule rules on the local clock, so timers work for
+        # both local and cloud-fallback devices and keep running with no browser
+        # open.
+        scheduler = asyncio.create_task(
+            run_scheduler(schedules, registry, groups, broadcaster)
+        )
+        tasks = (discovery, recorder, scheduler)
     yield
     for task in tasks:
         task.cancel()

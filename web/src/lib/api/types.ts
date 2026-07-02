@@ -124,6 +124,62 @@ export interface PowerResult {
 	failed: string[];
 }
 
+// ── Schedules (timers) ────────────────────────────────────────────────────────
+
+/** What a schedule rule acts on: a single device or a whole room (group). */
+export interface ScheduleTarget {
+	type: 'device' | 'room';
+	/** Device id or group id, per `type`. */
+	id: string;
+}
+
+export type ScheduleAction = 'on' | 'off';
+
+/** Audit note for a rule's most recent firing (server-written, read-only). */
+export interface LastFired {
+	/** Unix epoch seconds of the last firing attempt. */
+	ts: number;
+	/** Human-readable outcome, e.g. 'ok' or 'partial: 1 failed'. */
+	result: string;
+}
+
+/**
+ * A fixed-time rule: at `time` on `days`, apply `action` to `target`. `kind` is
+ * a discriminator fixed to 'fixed_time' in v1, left open so future rule kinds
+ * (sunrise/sunset, one-shot timers) can be added without reshaping these.
+ */
+export interface Schedule {
+	id: string;
+	kind: 'fixed_time';
+	enabled: boolean;
+	/** Local wall-clock time, 'HH:MM'. */
+	time: string;
+	/** Weekdays the rule fires on; 0=Monday … 6=Sunday. */
+	days: number[];
+	target: ScheduleTarget;
+	action: ScheduleAction;
+	/** Null until the rule first fires. */
+	last_fired: LastFired | null;
+}
+
+/** Fields a client supplies to create a rule; the server assigns id/last_fired. */
+export interface ScheduleCreate {
+	enabled?: boolean;
+	time: string;
+	days: number[];
+	target: ScheduleTarget;
+	action: ScheduleAction;
+}
+
+/** Partial update of a rule; omitted fields are left unchanged. */
+export interface ScheduleUpdate {
+	enabled?: boolean;
+	time?: string;
+	days?: number[];
+	target?: ScheduleTarget;
+	action?: ScheduleAction;
+}
+
 /** One persisted power reading: unix epoch seconds and watts (null if unread). */
 export interface EnergySample {
 	ts: number;

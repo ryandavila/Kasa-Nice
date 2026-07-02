@@ -86,6 +86,9 @@ class Settings(BaseSettings):
     kasa_snapshot_file: Path = Path("data/device_snapshots.json")
     kasa_groups_file: Path = Path("data/groups.json")
     kasa_energy_history_file: Path = Path("data/energy_history.db")
+    # Server-side schedule rules ("at HH:MM on these days, turn X on/off"). Sits
+    # beside the group store; mount it too so timers survive container rebuilds.
+    kasa_schedules_file: Path = Path("data/schedules.json")
 
     # ── Energy history / cost ────────────────────────────────────────────────
     kasa_energy_sample_interval: float = _DEFAULT_ENERGY_SAMPLE_INTERVAL

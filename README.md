@@ -76,6 +76,8 @@ All endpoints are under `/api`; interactive docs live at `http://localhost:8080/
 | `PATCH` / `DELETE` | `/api/groups/{id}` | Rename or set a room's devices / delete it |
 | `POST` | `/api/groups/{id}/power` | Switch every device in a room (`{"on": true\|false}`); returns `{on, succeeded, failed}` |
 | `GET` / `PUT` | `/api/favorites` | Read / set the starred device ids |
+| `GET` / `POST` | `/api/schedules` | List schedule rules / create one (see [Schedules](#schedules)) |
+| `PATCH` / `DELETE` | `/api/schedules/{id}` | Update (partial) / delete a schedule rule |
 
 ## Configuration
 
@@ -86,6 +88,7 @@ All endpoints are under `/api`; interactive docs live at `http://localhost:8080/
 | `KASA_STATE_FILE` | `data/known_devices.json` | Where known device hosts are persisted |
 | `KASA_GROUPS_FILE` | `data/groups.json` | Where rooms and favorites are persisted |
 | `KASA_ENERGY_HISTORY_FILE` | `data/energy_history.db` | SQLite database of recorded energy samples |
+| `KASA_SCHEDULES_FILE` | `data/schedules.json` | Where schedule (timer) rules are persisted |
 | `KASA_ENERGY_SAMPLE_INTERVAL` | `300` | Seconds between energy-history samples (min `10`). Higher = fewer reads, coarser history |
 | `TPLINK_USERNAME` | _(unset)_ | TP-Link cloud email, required for newer SMART-protocol devices (e.g. KP125M) |
 | `TPLINK_PASSWORD` | _(unset)_ | TP-Link cloud password, paired with `TPLINK_USERNAME` |
@@ -132,6 +135,27 @@ all cost fields are null and the UI shows kWh only.
 > **Note:** this is a **flat-rate approximation** — a single price per kWh. It does
 > not model tiered pricing, time-of-use rates, fixed service charges, or taxes, so
 > treat the figures as a rough estimate, not a bill.
+
+### Schedules
+
+The **Schedules** tab lets you create fixed-time rules — _"at **HH:MM** on these
+**days of the week**, turn a **device** or **room** **on** or **off**."_ Toggle a
+rule on/off, edit it, or delete it inline; each rule shows when it last ran and
+whether it succeeded.
+
+Rules run **server-side**: a background task evaluates them once a minute against
+the server's **local time**, so they fire whether or not a browser is open, and
+work uniformly for both locally-controlled and cloud-fallback devices. Room rules
+reuse the same partial-failure-tolerant fan-out as the "turn a room on/off"
+button, so one unreachable device doesn't stop the rest. A rule fires once per
+scheduled minute (a brief overrun is caught up; the server won't replay a backlog
+after a long suspend). Rules persist to `KASA_SCHEDULES_FILE` (default
+`data/schedules.json`) — mount it as a volume to keep them across rebuilds.
+
+Weekdays are numbered `0`=Monday … `6`=Sunday. The rule schema carries a `kind`
+discriminator (`"fixed_time"` today) so future rule kinds — sunrise/sunset,
+one-shot timers, brightness/colour actions — can be added without breaking
+existing rules.
 
 Broadcast discovery only reaches devices on the server's own subnet — it can't
 cross VLAN boundaries. If your plugs live on a separate subnet (e.g. an isolated

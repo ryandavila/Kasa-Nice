@@ -8,9 +8,10 @@
 	import DiscoveryPanel from '$lib/components/DiscoveryPanel.svelte';
 	import EnergyPanel from '$lib/components/EnergyPanel.svelte';
 	import RoomsView from '$lib/components/RoomsView.svelte';
+	import SchedulesView from '$lib/components/SchedulesView.svelte';
 	import ThemeToggle from '$lib/components/ThemeToggle.svelte';
 
-	type Tab = 'devices' | 'energy' | 'discovery';
+	type Tab = 'devices' | 'energy' | 'schedules' | 'discovery';
 	let tab = $state<Tab>('devices');
 
 	// How the Devices tab groups cards: by device type (default) or by user room.
@@ -127,7 +128,7 @@
 
 	<!-- ── Tabs ───────────────────────────────────────────────────────────── -->
 	<nav class="mb-8 inline-flex rounded-full border border-line bg-surface/70 p-1">
-		{#each [{ id: 'devices', label: 'Devices' }, { id: 'energy', label: 'Energy' }, { id: 'discovery', label: 'Discovery' }] as t (t.id)}
+		{#each [{ id: 'devices', label: 'Devices' }, { id: 'energy', label: 'Energy' }, { id: 'schedules', label: 'Schedules' }, { id: 'discovery', label: 'Discovery' }] as t (t.id)}
 			<button
 				type="button"
 				onclick={() => (tab = t.id as Tab)}
@@ -256,6 +257,8 @@
 		{/if}
 	{:else if tab === 'energy'}
 		<EnergyPanel />
+	{:else if tab === 'schedules'}
+		<SchedulesView />
 	{:else}
 		<DiscoveryPanel />
 	{/if}

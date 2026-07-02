@@ -6,6 +6,9 @@ import type {
 	Group,
 	Hsv,
 	PowerResult,
+	Schedule,
+	ScheduleCreate,
+	ScheduleUpdate,
 	ServerConfig,
 	ServerStatus,
 	Usage
@@ -140,3 +143,14 @@ export const getFavorites = () => request<Favorites>('/favorites');
 
 export const setFavorites = (deviceIds: string[]) =>
 	put<Favorites>('/favorites', { device_ids: deviceIds });
+
+// ── Schedules (timers) ────────────────────────────────────────────────────────
+
+export const listSchedules = () => request<Schedule[]>('/schedules');
+
+export const createSchedule = (rule: ScheduleCreate) => post<Schedule>('/schedules', rule);
+
+export const updateSchedule = (id: string, patch_: ScheduleUpdate) =>
+	patch<Schedule>(`/schedules/${encodeURIComponent(id)}`, patch_);
+
+export const deleteSchedule = (id: string) => del(`/schedules/${encodeURIComponent(id)}`);

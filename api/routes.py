@@ -17,6 +17,7 @@ from .kasa_service import (
     serialize_device,
     stable_device_id,
 )
+from .schedule_store import schedules
 from .schemas import (
     BrightnessRequest,
     ColorRequest,
@@ -33,6 +34,9 @@ from .schemas import (
     PowerRequest,
     PowerResult,
     RenameRequest,
+    Schedule,
+    ScheduleCreate,
+    ScheduleUpdate,
     ServerConfig,
     ServerStatus,
     SubnetScanRequest,
@@ -363,3 +367,38 @@ async def get_favorites() -> Favorites:
 @router.put("/favorites", response_model=Favorites)
 async def set_favorites(req: Favorites) -> Favorites:
     return Favorites(device_ids=groups.set_favorites(req.device_ids))
+
+
+# ── Schedules (timers) ────────────────────────────────────────────────────────
+
+
+@router.get("/schedules", response_model=list[Schedule])
+async def list_schedules() -> list[Schedule]:
+    # Re-validate stored rules through the model so a hand-edited or older file
+    # can't emit a malformed rule to the client; the store itself stays tolerant.
+    return [Schedule(**s) for s in schedules.list_rules()]
+
+
+@router.post("/schedules", response_model=Schedule, status_code=201)
+async def create_schedule(req: ScheduleCreate) -> Schedule:
+    # ``req`` is already validated (time format, weekday range) by pydantic; the
+    # store stamps the id and null ``last_fired``. The scheduler picks the new
+    # rule up on its next minute tick — no restart or explicit reload needed.
+    return Schedule(**schedules.create_rule(req.model_dump()))
+
+
+@router.patch("/schedules/{schedule_id}", response_model=Schedule)
+async def update_schedule(schedule_id: str, req: ScheduleUpdate) -> Schedule:
+    # exclude_unset keeps this a true partial update: only the fields the client
+    # actually sent are written, so e.g. an enable/disable toggle leaves the
+    # time, days, and target exactly as they were.
+    updated = schedules.update_rule(schedule_id, req.model_dump(exclude_unset=True))
+    if updated is None:
+        raise HTTPException(status_code=404, detail=f"Unknown schedule: {schedule_id}")
+    return Schedule(**updated)
+
+
+@router.delete("/schedules/{schedule_id}", status_code=204)
+async def delete_schedule(schedule_id: str) -> None:
+    if not schedules.delete_rule(schedule_id):
+        raise HTTPException(status_code=404, detail=f"Unknown schedule: {schedule_id}")

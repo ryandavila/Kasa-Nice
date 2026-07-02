@@ -93,6 +93,13 @@ class Settings(BaseSettings):
     kasa_energy_rate: float | None = None
     kasa_energy_currency: str = "$"
 
+    # ── Location (for sunrise/sunset schedules) ──────────────────────────────
+    # Decimal degrees, latitude positive north and longitude positive east. Both
+    # must be set for sunrise/sunset rules to fire; unset => those rules never do
+    # (the API rejects creating them, and the UI hints that location is missing).
+    kasa_latitude: float | None = None
+    kasa_longitude: float | None = None
+
     # ── Cloud fallback (opt-in; sends credentials to TP-Link's servers) ───────
     kasa_cloud_fallback: bool = False
     # Comma-separated model prefixes routed through the cloud. Exposed parsed as
@@ -120,6 +127,18 @@ class Settings(BaseSettings):
     def cloud_models(self) -> tuple[str, ...]:
         """``kasa_cloud_models`` split into a tuple, dropping blank entries."""
         return tuple(m.strip() for m in self.kasa_cloud_models.split(",") if m.strip())
+
+    @property
+    def location(self) -> tuple[float, float] | None:
+        """``(latitude, longitude)`` when both are set, else None.
+
+        Sunrise/sunset schedules need both coordinates; None means location is
+        unconfigured, so those rules can't fire (and the API rejects creating
+        them).
+        """
+        if self.kasa_latitude is None or self.kasa_longitude is None:
+            return None
+        return (self.kasa_latitude, self.kasa_longitude)
 
     # ── Validators ───────────────────────────────────────────────────────────
     # These knobs warn and fall back to the default rather than raising, so a
@@ -191,6 +210,38 @@ class Settings(BaseSettings):
         except ValueError:
             logger.warning(f"Ignoring invalid KASA_ALERT_INTERVAL={value!r}; using 60s")
             return _DEFAULT_ALERT_INTERVAL
+
+    @field_validator("kasa_latitude", mode="before")
+    @classmethod
+    def _parse_latitude(cls, value: object) -> float | None:
+        # Warn and ignore a non-numeric or out-of-range latitude rather than
+        # raising (matches the other knobs); an invalid value leaves location
+        # unset, so sunrise/sunset rules just don't fire.
+        return cls._parse_coordinate(value, "KASA_LATITUDE", 90.0)
+
+    @field_validator("kasa_longitude", mode="before")
+    @classmethod
+    def _parse_longitude(cls, value: object) -> float | None:
+        return cls._parse_coordinate(value, "KASA_LONGITUDE", 180.0)
+
+    @staticmethod
+    def _parse_coordinate(value: object, name: str, limit: float) -> float | None:
+        if value is None:
+            return None
+        text = str(value).strip()
+        if not text:
+            return None
+        try:
+            parsed = float(text)
+        except ValueError:
+            logger.warning(f"Ignoring invalid {name}={value!r}; expected a number")
+            return None
+        if abs(parsed) > limit:
+            logger.warning(
+                f"Ignoring out-of-range {name}={value!r}; expected |value| <= {limit:g}"
+            )
+            return None
+        return parsed
 
     @field_validator("kasa_port", mode="before")
     @classmethod

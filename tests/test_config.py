@@ -181,3 +181,44 @@ def test_cloud_fallback_truthy(value):
 @pytest.mark.parametrize("value", ["", "0", "false", "no", "off", "banana"])
 def test_cloud_fallback_falsy(value):
     assert _settings(kasa_cloud_fallback=value).kasa_cloud_fallback is False
+
+
+# ── location (sunrise/sunset schedules) ──────────────────────────────────────
+
+
+def test_location_none_by_default():
+    s = _settings()
+    assert s.kasa_latitude is None
+    assert s.kasa_longitude is None
+    assert s.location is None
+
+
+def test_location_set_when_both_present():
+    s = _settings(kasa_latitude="40.7128", kasa_longitude="-74.0060")
+    assert s.location == (40.7128, -74.0060)
+
+
+def test_location_none_when_only_one_set():
+    # Both coordinates are required; a lone latitude is not a usable location.
+    assert _settings(kasa_latitude="40.7").location is None
+
+
+def test_invalid_latitude_warns_and_disables(caplog):
+    with caplog.at_level(logging.WARNING):
+        s = _settings(kasa_latitude="north")
+    assert s.kasa_latitude is None
+    assert "KASA_LATITUDE" in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "name"),
+    [
+        ("kasa_latitude", "91", "KASA_LATITUDE"),
+        ("kasa_longitude", "-181", "KASA_LONGITUDE"),
+    ],
+)
+def test_out_of_range_coordinate_warns_and_disables(caplog, field, value, name):
+    with caplog.at_level(logging.WARNING):
+        s = _settings(**{field: value})
+    assert getattr(s, field) is None
+    assert name in caplog.text

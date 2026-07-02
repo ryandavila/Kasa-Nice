@@ -113,6 +113,8 @@ All endpoints are under `/api`; interactive docs live at `http://localhost:8080/
 | `KASA_CLOUD_POLL_INTERVAL` | `30` | Seconds between cloud-device state refreshes during the live poll (local devices refresh every poll). Higher = fewer TP-Link round-trips |
 | `KASA_ENERGY_RATE` | _(unset)_ | Flat cost per kWh (a number, e.g. `0.18`) used to show energy cost — see below. Leave unset to hide cost |
 | `KASA_ENERGY_CURRENCY` | `$` | Currency symbol/prefix shown before cost amounts |
+| `KASA_LATITUDE` | _(unset)_ | Latitude in decimal degrees (positive north, e.g. `40.7128`) for sunrise/sunset schedules. Both this and `KASA_LONGITUDE` are required for those rules to fire |
+| `KASA_LONGITUDE` | _(unset)_ | Longitude in decimal degrees (positive east, e.g. `-74.0060`) — paired with `KASA_LATITUDE` |
 
 Newer Kasa devices use TP-Link's SMART protocol and authenticate before they
 can be discovered or controlled. Provide your TP-Link cloud credentials via a
@@ -153,24 +155,44 @@ all cost fields are null and the UI shows kWh only.
 
 ### Schedules
 
-The **Schedules** tab lets you create fixed-time rules — _"at **HH:MM** on these
-**days of the week**, turn a **device** or **room** **on** or **off**."_ Toggle a
-rule on/off, edit it, or delete it inline; each rule shows when it last ran and
-whether it succeeded.
+The **Schedules** tab lets you create rules that fire on one of four **triggers**:
+
+- **Fixed time** — _"at **HH:MM** on these **days of the week**."_
+- **Sunrise** / **Sunset** — relative to the sun for the server's location, with
+  an **offset** in minutes (e.g. `−30` = 30 minutes before), on selected days.
+- **Once** — at a single **date & time**, then the rule auto-disables (it's kept,
+  not deleted, so you can see it ran).
+
+Each rule's **action** switches its **device** or **room** **on** / **off**, or
+**applies a scene** (a scene owns its own device list, so a scene rule needs no
+target). Toggle a rule on/off, edit it, or delete it inline; each shows when it
+last ran and whether it succeeded.
 
 Rules run **server-side**: a background task evaluates them once a minute against
 the server's **local time**, so they fire whether or not a browser is open, and
-work uniformly for both locally-controlled and cloud-fallback devices. Room rules
-reuse the same partial-failure-tolerant fan-out as the "turn a room on/off"
-button, so one unreachable device doesn't stop the rest. A rule fires once per
-scheduled minute (a brief overrun is caught up; the server won't replay a backlog
-after a long suspend). Rules persist to `KASA_SCHEDULES_FILE` (default
-`data/schedules.json`) — mount it as a volume to keep them across rebuilds.
+work uniformly for both locally-controlled and cloud-fallback devices. Each tick
+computes today's sunrise/sunset for the configured location (a small pure-Python
+[NOAA](https://gml.noaa.gov/grad/solcalc/solareqns.PDF) calculation, no extra
+dependency) and applies the offset. Room and scene rules reuse the same
+partial-failure-tolerant fan-out as the manual controls, so one unreachable
+device doesn't stop the rest. A rule fires once per scheduled minute (a brief
+overrun is caught up; the server won't replay a backlog after a long suspend).
+Rules persist to `KASA_SCHEDULES_FILE` (default `data/schedules.json`) — mount it
+as a volume to keep them across rebuilds.
+
+Sunrise/sunset rules need a **location**: set `KASA_LATITUDE` and `KASA_LONGITUDE`
+(see [Configuration](#configuration)). Without them the API rejects creating such
+a rule (422) and the composer shows a hint; any that already exist simply don't
+fire (logged once).
+
+Device cards also carry a quick **"turn off in N minutes"** menu (the moon icon
+on an on device) with 15/30/60-minute presets — it just posts a one-shot `once`
+rule computed in the browser, so the countdown runs on the server.
 
 Weekdays are numbered `0`=Monday … `6`=Sunday. The rule schema carries a `kind`
-discriminator (`"fixed_time"` today) so future rule kinds — sunrise/sunset,
-one-shot timers, brightness/colour actions — can be added without breaking
-existing rules.
+discriminator (`fixed_time` / `sunrise` / `sunset` / `once`) and a flat `action`
+(`on` / `off` / `scene`), both left open so further kinds and actions can be
+added without breaking existing rules — an old `fixed_time` file loads unchanged.
 
 ### Scenes
 

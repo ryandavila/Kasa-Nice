@@ -8,9 +8,11 @@ One small JSON file, tolerant load/save like ``GroupStore`` (a read problem
 degrades to an empty document). Rule *shape* is validated at the API boundary
 (``schemas.py``); this layer just persists dicts and does id bookkeeping.
 
-Rules carry a ``kind`` discriminator (``"fixed_time"`` in v1). Since this store
-passes dicts through untouched, a rule written by a newer build (with a kind the
-scheduler skips) survives a downgrade intact instead of being dropped.
+Rules carry a ``kind`` discriminator (``"fixed_time"``, ``"sunrise"``,
+``"sunset"``, or ``"once"``). Since this store passes dicts through untouched, a
+rule written by a newer build (with a kind the scheduler skips) survives a
+downgrade intact instead of being dropped, and an old v1 file (fixed_time rules
+with none of the newer fields) loads and round-trips unchanged.
 """
 
 import json

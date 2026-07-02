@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException
 from kasa.exceptions import KasaException
 
 from .alerts import alert_center, alert_thresholds
+from .config import get_settings
 from .energy_history import history
 from .events import broadcaster
 from .group_store import groups
@@ -90,6 +91,8 @@ async def config() -> ServerConfig:
         scan_subnet=registry.scan_subnet,
         energy_rate=registry.energy_rate,
         energy_currency=registry.energy_currency,
+        # Sunrise/sunset schedules need a location; the UI hints when it's missing.
+        location_configured=get_settings().location is not None,
     )
 
 
@@ -510,8 +513,17 @@ async def list_schedules() -> list[Schedule]:
 
 @router.post("/schedules", response_model=Schedule, status_code=201)
 async def create_schedule(req: ScheduleCreate) -> Schedule:
-    # ``req`` is pydantic-validated; the store stamps id and null ``last_fired``.
-    # The scheduler picks it up on its next minute tick — no restart needed.
+    # ``req`` is pydantic-validated for shape; a sunrise/sunset rule additionally
+    # needs a configured location to ever fire, so reject it up front with a clear
+    # message rather than persisting a rule that silently never runs.
+    if req.kind in ("sunrise", "sunset") and get_settings().location is None:
+        raise HTTPException(
+            status_code=422,
+            detail="Sunrise/sunset schedules require a server location; set "
+            "KASA_LATITUDE and KASA_LONGITUDE.",
+        )
+    # The store stamps id and null ``last_fired``. The scheduler picks it up on
+    # its next minute tick — no restart needed.
     return Schedule(**schedules.create_rule(req.model_dump()))
 
 

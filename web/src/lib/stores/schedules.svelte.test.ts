@@ -35,8 +35,11 @@ function rule(over: Partial<Schedule> = {}): Schedule {
 		enabled: true,
 		time: '18:30',
 		days: [0, 1, 2],
+		offset_minutes: 0,
+		at: null,
 		target: { type: 'device', id: 'd1' },
 		action: 'on',
+		scene_id: null,
 		last_fired: null,
 		...over
 	};
@@ -87,6 +90,46 @@ describe('create', () => {
 		});
 		expect(created).toBeNull();
 		expect(scheduleStore.rules).toEqual([]);
+	});
+
+	it('passes new-kind and scene-action fields through to the server', async () => {
+		createSchedule.mockResolvedValue(
+			rule({ id: 'r7', kind: 'sunset', time: null, offset_minutes: -15 })
+		);
+		await scheduleStore.create({
+			kind: 'sunset',
+			days: [0, 1],
+			offset_minutes: -15,
+			target: { type: 'device', id: 'd1' },
+			action: 'on'
+		});
+		expect(createSchedule).toHaveBeenCalledWith(
+			expect.objectContaining({ kind: 'sunset', offset_minutes: -15 })
+		);
+		expect(scheduleStore.rules.map((r) => r.id)).toContain('r7');
+	});
+
+	it('creates a one-shot scene rule (at + scene_id, no target)', async () => {
+		createSchedule.mockResolvedValue(
+			rule({
+				id: 'r8',
+				kind: 'once',
+				time: null,
+				at: '2024-06-01T07:15',
+				action: 'scene',
+				scene_id: 's1'
+			})
+		);
+		const created = await scheduleStore.create({
+			kind: 'once',
+			at: '2024-06-01T07:15',
+			action: 'scene',
+			scene_id: 's1'
+		});
+		expect(created?.scene_id).toBe('s1');
+		expect(createSchedule).toHaveBeenCalledWith(
+			expect.objectContaining({ kind: 'once', at: '2024-06-01T07:15', scene_id: 's1' })
+		);
 	});
 });
 

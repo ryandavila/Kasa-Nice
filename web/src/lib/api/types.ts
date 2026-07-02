@@ -69,6 +69,8 @@ export interface ServerConfig {
 	energy_rate: number | null;
 	/** Currency symbol for cost display, e.g. "$" (default "$"). */
 	energy_currency: string;
+	/** True when a server location is set, so sunrise/sunset schedules can fire. */
+	location_configured: boolean;
 }
 
 export interface Usage {
@@ -132,7 +134,17 @@ export interface ScheduleTarget {
 	id: string;
 }
 
-export type ScheduleAction = 'on' | 'off';
+/**
+ * How a rule is triggered: a fixed wall-clock time, relative to sunrise/sunset
+ * for the server's location (with an offset), or once at a single datetime.
+ */
+export type ScheduleKind = 'fixed_time' | 'sunrise' | 'sunset' | 'once';
+
+/**
+ * What a rule does: switch its `target` on/off, or apply a scene by `scene_id`
+ * (the scene owns its device list, so a scene rule needs no target).
+ */
+export type ScheduleAction = 'on' | 'off' | 'scene';
 
 /** Audit note for a rule's most recent firing (server-written, read-only). */
 export interface LastFired {
@@ -143,40 +155,56 @@ export interface LastFired {
 }
 
 /**
- * A fixed-time rule: at `time` on `days`, apply `action` to `target`. `kind` is
- * a discriminator fixed to 'fixed_time' in v1, left open so future rule kinds
- * (sunrise/sunset, one-shot timers) can be added without reshaping these.
+ * A schedule rule. A single flat shape discriminated by `kind` and `action`: the
+ * trigger fields (`time` / `days` / `offset_minutes` / `at`) and action fields
+ * (`target` / `scene_id`) are all optional, and which are populated depends on
+ * the kind/action — so an old fixed-time rule still matches this type.
  */
 export interface Schedule {
 	id: string;
-	kind: 'fixed_time';
+	kind: ScheduleKind;
 	enabled: boolean;
-	/** Local wall-clock time, 'HH:MM'. */
-	time: string;
-	/** Weekdays the rule fires on; 0=Monday … 6=Sunday. */
+	/** Local wall-clock time 'HH:MM'; set for the 'fixed_time' kind, else null. */
+	time: string | null;
+	/** Weekdays the rule fires on; 0=Monday … 6=Sunday. Empty for 'once'. */
 	days: number[];
-	target: ScheduleTarget;
+	/** Minutes added to sunrise/sunset for sun rules (negative = before). */
+	offset_minutes: number;
+	/** One-shot local datetime 'YYYY-MM-DDTHH:MM' for the 'once' kind, else null. */
+	at: string | null;
+	/** Device/room to switch for on/off actions; null for a scene action. */
+	target: ScheduleTarget | null;
 	action: ScheduleAction;
+	/** Scene to apply for the 'scene' action; null otherwise. */
+	scene_id: string | null;
 	/** Null until the rule first fires. */
 	last_fired: LastFired | null;
 }
 
 /** Fields a client supplies to create a rule; the server assigns id/last_fired. */
 export interface ScheduleCreate {
+	kind?: ScheduleKind;
 	enabled?: boolean;
-	time: string;
-	days: number[];
-	target: ScheduleTarget;
+	time?: string | null;
+	days?: number[];
+	offset_minutes?: number;
+	at?: string | null;
+	target?: ScheduleTarget | null;
 	action: ScheduleAction;
+	scene_id?: string | null;
 }
 
 /** Partial update of a rule; omitted fields are left unchanged. */
 export interface ScheduleUpdate {
 	enabled?: boolean;
-	time?: string;
+	kind?: ScheduleKind;
+	time?: string | null;
 	days?: number[];
-	target?: ScheduleTarget;
+	offset_minutes?: number;
+	at?: string | null;
+	target?: ScheduleTarget | null;
 	action?: ScheduleAction;
+	scene_id?: string | null;
 }
 
 // ── Scenes ──────────────────────────────────────────────────────────────────

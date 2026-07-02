@@ -1,9 +1,24 @@
+import json
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from api import routes
 from api.schedule_store import ScheduleStore
+from api.schemas import Schedule
+
+
+class _FakeSettings:
+    """Minimal stand-in exposing only what the schedule routes read."""
+
+    def __init__(self, location: tuple[float, float] | None) -> None:
+        self.location = location
+
+
+def _set_location(monkeypatch, location: tuple[float, float] | None) -> None:
+    """Force the server's configured location for a test (independent of .env)."""
+    monkeypatch.setattr(routes, "get_settings", lambda: _FakeSettings(location))
 
 
 @pytest.fixture
@@ -180,3 +195,137 @@ def test_api_patch_unknown_404(client):
 
 def test_api_delete_unknown_404(client):
     assert client.delete("/api/schedules/nope").status_code == 404
+
+
+# ── New rule kinds & actions (create validation) ─────────────────────────────
+
+NYC = (40.7128, -74.0060)
+
+
+def test_api_create_sunrise_requires_location(client, monkeypatch):
+    _set_location(monkeypatch, None)
+    resp = client.post(
+        "/api/schedules",
+        json=_payload(kind="sunrise", offset_minutes=-30, time=None),
+    )
+    assert resp.status_code == 422
+    assert "location" in resp.json()["detail"].lower()
+
+
+def test_api_create_sunset_with_location_ok(client, monkeypatch):
+    _set_location(monkeypatch, NYC)
+    body = client.post(
+        "/api/schedules",
+        json=_payload(kind="sunset", offset_minutes=15, time=None),
+    ).json()
+    assert body["kind"] == "sunset"
+    assert body["offset_minutes"] == 15
+    assert body["time"] is None
+
+
+def test_api_create_once_rule_shape(client, monkeypatch):
+    _set_location(monkeypatch, None)  # once needs no location
+    body = client.post(
+        "/api/schedules",
+        json={
+            "kind": "once",
+            "at": "2024-06-01T07:15",
+            "target": {"type": "device", "id": "10.0.0.1"},
+            "action": "on",
+        },
+    ).json()
+    assert body["kind"] == "once"
+    assert body["at"] == "2024-06-01T07:15"
+    assert body["days"] == []
+
+
+def test_api_create_once_rejects_bad_at(client):
+    resp = client.post(
+        "/api/schedules",
+        json={
+            "kind": "once",
+            "at": "not-a-datetime",
+            "target": {"type": "device", "id": "10.0.0.1"},
+            "action": "on",
+        },
+    )
+    assert resp.status_code == 422
+
+
+def test_api_create_scene_action_shape(client):
+    # A scene action needs a scene_id and no target (the scene owns its devices).
+    body = client.post(
+        "/api/schedules",
+        json={
+            "kind": "fixed_time",
+            "time": "20:00",
+            "days": [0, 2, 4],
+            "action": "scene",
+            "scene_id": "movie-night",
+        },
+    ).json()
+    assert body["action"] == "scene"
+    assert body["scene_id"] == "movie-night"
+    assert body["target"] is None
+
+
+def test_api_create_scene_action_requires_scene_id(client):
+    resp = client.post(
+        "/api/schedules",
+        json={"kind": "fixed_time", "time": "20:00", "days": [0], "action": "scene"},
+    )
+    assert resp.status_code == 422
+
+
+def test_api_create_onoff_requires_target(client):
+    # Omitting the target for a plain on/off action is rejected.
+    resp = client.post(
+        "/api/schedules",
+        json={"kind": "fixed_time", "time": "20:00", "days": [0], "action": "on"},
+    )
+    assert resp.status_code == 422
+
+
+# ── Migration: a v1-shape rules file loads and round-trips unchanged ──────────
+
+
+def test_v1_shape_rule_loads_validates_and_round_trips(tmp_path):
+    # A file written by v1: fixed_time rules with none of the newer fields (and one
+    # even older rule with no ``kind`` at all).
+    path = tmp_path / "schedules.json"
+    old = {
+        "id": "old1",
+        "kind": "fixed_time",
+        "enabled": True,
+        "time": "07:00",
+        "days": [0, 1, 2, 3, 4],
+        "target": {"type": "device", "id": "10.0.0.1"},
+        "action": "on",
+        "last_fired": None,
+    }
+    oldest = {
+        "id": "old0",
+        "enabled": True,
+        "time": "22:00",
+        "days": [5, 6],
+        "target": {"type": "room", "id": "r1"},
+        "action": "off",
+        "last_fired": None,
+    }
+    path.write_text(json.dumps({"schedules": [old, oldest]}))
+    store = ScheduleStore(path)
+
+    raw = store.list_rules()
+    assert raw == [old, oldest]  # persisted dicts are untouched
+
+    # Both validate through the current model, defaulting the new fields.
+    model = Schedule(**raw[0])
+    assert model.kind == "fixed_time"
+    assert model.offset_minutes == 0
+    assert model.at is None
+    assert model.scene_id is None
+    # The kind-less oldest rule loads as fixed_time.
+    assert Schedule(**raw[1]).kind == "fixed_time"
+
+    # A no-op re-read leaves the file's rules exactly as written.
+    assert ScheduleStore(path).get_rule("old1") == old

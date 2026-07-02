@@ -2,6 +2,8 @@
 	import type { ChildPlug, Device } from '$lib/api/types';
 	import { deviceStore } from '$lib/stores/devices.svelte';
 	import { groupStore } from '$lib/stores/groups.svelte';
+	import { scheduleStore } from '$lib/stores/schedules.svelte';
+	import { toasts } from '$lib/stores/toasts.svelte';
 	import Icon from './Icon.svelte';
 	import Toggle from './Toggle.svelte';
 	import BrightnessSlider from './BrightnessSlider.svelte';
@@ -65,11 +67,47 @@
 		node.focus();
 		node.select();
 	}
+
+	// ── Sleep timer ("turn off in N minutes") ──────────────────────────────────
+	// A quick affordance that schedules a one-shot 'off' rule computed client-side
+	// (the server owns firing, so it works with no browser open). The dropdown
+	// closes on an outside click or Escape via the svelte:window handlers.
+	const TIMER_PRESETS = [15, 30, 60] as const;
+	let timerOpen = $state(false);
+	let timerBox = $state<HTMLDivElement | null>(null);
+
+	/** Local 'YYYY-MM-DDTHH:MM' this many minutes from now (what the 'once' kind wants). */
+	function inMinutes(mins: number): string {
+		const d = new Date(Date.now() + mins * 60_000);
+		const pad = (n: number) => String(n).padStart(2, '0');
+		return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+	}
+
+	async function scheduleOff(mins: number) {
+		timerOpen = false;
+		const created = await scheduleStore.create({
+			kind: 'once',
+			at: inMinutes(mins),
+			action: 'off',
+			target: { type: 'device', id: device.id }
+		});
+		// create() toasts on failure; confirm success here.
+		if (created) toasts.push(`${device.alias} will turn off in ${mins} min`, 'info');
+	}
+
+	function onTimerWindowClick(e: MouseEvent) {
+		if (timerOpen && timerBox && !timerBox.contains(e.target as Node)) timerOpen = false;
+	}
+	function onTimerWindowKey(e: KeyboardEvent) {
+		if (e.key === 'Escape') timerOpen = false;
+	}
 </script>
 
 <!-- A known-but-unreachable device renders as a grayed, non-interactive card with
 	only a retry affordance; the live card below is bypassed entirely so none of its
 	controls (toggle, brightness, color, energy) are reachable. -->
+<svelte:window onclick={onTimerWindowClick} onkeydown={onTimerWindowKey} />
+
 {#if !device.reachable}
 	<UnreachableCard {device} {delay} />
 {:else}
@@ -141,6 +179,42 @@
 			</div>
 
 			<div class="flex shrink-0 items-center gap-2">
+				{#if live}
+					<!-- Sleep timer: schedule a one-shot "turn off in N min" (server-side). -->
+					<div class="relative" bind:this={timerBox}>
+						<button
+							type="button"
+							onclick={() => (timerOpen = !timerOpen)}
+							aria-haspopup="menu"
+							aria-expanded={timerOpen}
+							aria-label="Turn off later"
+							title="Turn off later"
+							class="grid h-8 w-8 place-items-center rounded-full text-faint transition-colors hover:text-muted"
+						>
+							<Icon name="moon" size={17} />
+						</button>
+						{#if timerOpen}
+							<div
+								role="menu"
+								class="animate-rise absolute right-0 z-30 mt-2 w-40 overflow-hidden rounded-card border border-line bg-surface py-1 shadow-[0_18px_40px_-20px_var(--glow)]"
+							>
+								<p class="px-3 py-1.5 text-xs font-medium uppercase tracking-wide text-faint">
+									Turn off in
+								</p>
+								{#each TIMER_PRESETS as mins (mins)}
+									<button
+										type="button"
+										role="menuitem"
+										onclick={() => scheduleOff(mins)}
+										class="flex w-full items-center px-3 py-2 text-left text-sm text-muted transition-colors hover:bg-raised hover:text-ink"
+									>
+										{mins} minutes
+									</button>
+								{/each}
+							</div>
+						{/if}
+					</div>
+				{/if}
 				<button
 					type="button"
 					onclick={() => groupStore.toggleFavorite(device.id)}

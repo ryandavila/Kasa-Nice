@@ -1,3 +1,4 @@
+import datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -133,6 +134,11 @@ class ServerConfig(BaseModel):
         default="$",
         description="Currency symbol/prefix shown alongside energy cost.",
     )
+    location_configured: bool = Field(
+        default=False,
+        description="True when both latitude and longitude are set, so "
+        "sunrise/sunset schedules can fire. The UI hints when this is false.",
+    )
 
 
 class ServerStatus(BaseModel):
@@ -220,18 +226,80 @@ class Favorites(BaseModel):
 # a rule's days against the local clock with no remapping.
 _HHMM = r"^([01]\d|2[0-3]):[0-5]\d$"
 
+# Rule kinds. ``fixed_time`` (a wall-clock HH:MM) is the original; ``sunrise`` /
+# ``sunset`` fire relative to the sun for the configured location; ``once`` fires
+# at a single local datetime then auto-disables. The default is ``fixed_time`` so
+# a v1 file (no ``kind``) still loads as one.
+ScheduleKind = Literal["fixed_time", "sunrise", "sunset", "once"]
+
+# Actions. ``on``/``off`` switch the ``target``; ``scene`` applies a scene by id
+# (which owns its own device list, so it needs no ``target``). Kept a flat string
+# — not a nested object — so an existing rule's ``"action": "on"`` migrates with
+# no rewrite when it round-trips through this model.
+ScheduleAction = Literal["on", "off", "scene"]
+
 
 def _normalize_days(days: list[int]) -> list[int]:
     """Validate weekday ints and normalise to a sorted, de-duplicated list.
 
-    Persisted as a canonical list (JSON has no set). At least one day is required
-    (a rule with none would never fire). Shared by all schedule schemas.
+    Persisted as a canonical list (JSON has no set). An empty list is returned
+    unchanged here; whether *some* day is required depends on the rule kind, so
+    that check lives in the per-model validator. Shared by all schedule schemas.
     """
-    if not days:
-        raise ValueError("at least one weekday is required")
     if any(d < 0 or d > 6 for d in days):
         raise ValueError("weekdays must be between 0 (Monday) and 6 (Sunday)")
     return sorted(set(days))
+
+
+def _validate_at(value: str | None) -> str | None:
+    """Validate a one-shot ``at`` local datetime string ('YYYY-MM-DDTHH:MM').
+
+    Parsed with ``fromisoformat`` (which also accepts seconds) purely to reject
+    garbage; the stored string is left as given and compared to the minute cursor
+    by the scheduler. ``None`` passes through for the other rule kinds.
+    """
+    if value is None:
+        return value
+    try:
+        datetime.datetime.fromisoformat(value)
+    except ValueError as e:
+        raise ValueError("at must be an ISO local datetime, 'YYYY-MM-DDTHH:MM'") from e
+    return value
+
+
+def _require(condition: bool, message: str) -> None:  # noqa: FBT001 - tiny guard
+    """Raise ``ValueError(message)`` unless ``condition`` holds. Reads as a rule."""
+    if not condition:
+        raise ValueError(message)
+
+
+def _validate_rule_shape(
+    *,
+    kind: str,
+    time: str | None,
+    days: list[int],
+    at: str | None,
+    action: str,
+    target: ScheduleTarget | None,
+    scene_id: str | None,
+) -> None:
+    """Cross-field checks shared by the full-rule schemas (create + stored).
+
+    Enforces the per-kind and per-action requirements the flat field set can't
+    express alone: a fixed-time rule needs a ``time``, sun rules and fixed-time
+    rules need at least one weekday, a one-shot needs an ``at``, a scene action
+    needs a ``scene_id``, and every other action needs a ``target``.
+    """
+    if kind == "fixed_time":
+        _require(time is not None, "fixed_time rules require a 'time'")
+    if kind in ("fixed_time", "sunrise", "sunset"):
+        _require(bool(days), "at least one weekday is required")
+    if kind == "once":
+        _require(at is not None, "once rules require an 'at' datetime")
+    if action == "scene":
+        _require(bool(scene_id), "scene actions require a 'scene_id'")
+    else:
+        _require(target is not None, "on/off actions require a 'target'")
 
 
 class ScheduleTarget(BaseModel):
@@ -255,22 +323,40 @@ class LastFired(BaseModel):
 
 
 class Schedule(BaseModel):
-    """A fixed-time rule: at ``time`` on ``days``, apply ``action`` to ``target``.
+    """A schedule rule, discriminated by ``kind`` and ``action``.
 
-    ``kind`` is fixed to ``"fixed_time"`` in v1, left open so later rule kinds
-    (sunrise/sunset, one-shot timers) can be added without breaking existing
-    rules; likewise ``action`` can gain values, leaving on/off rules untouched.
+    A single flat model rather than a union: the trigger fields (``time`` /
+    ``days`` / ``offset_minutes`` / ``at``) and action fields (``target`` /
+    ``scene_id``) are all optional with defaults, and a per-kind/per-action
+    validator enforces which are required. That shape is deliberately tolerant of
+    a v1 file — a fixed_time rule with none of the new fields loads unchanged —
+    and lets a newer kind be added without reshaping older rules.
     """
 
     id: str
-    kind: Literal["fixed_time"] = "fixed_time"
+    kind: ScheduleKind = "fixed_time"
     enabled: bool = True
-    time: str = Field(pattern=_HHMM, description="Local wall-clock time, 'HH:MM'.")
+    # Local wall-clock time; required (and validated) only for fixed_time rules.
+    time: str | None = Field(default=None, pattern=_HHMM)
     days: list[int] = Field(
-        description="Weekdays the rule fires on; 0=Monday … 6=Sunday."
+        default_factory=list,
+        description="Weekdays the rule fires on; 0=Monday … 6=Sunday. Unused by "
+        "the 'once' kind.",
     )
-    target: ScheduleTarget
-    action: Literal["on", "off"]
+    offset_minutes: int = Field(
+        default=0,
+        description="Minutes added to sunrise/sunset for sun rules (negative = "
+        "before). Ignored by other kinds.",
+    )
+    at: str | None = Field(
+        default=None,
+        description="One-shot local datetime for the 'once' kind, 'YYYY-MM-DDTHH:MM'.",
+    )
+    target: ScheduleTarget | None = None
+    action: ScheduleAction
+    scene_id: str | None = Field(
+        default=None, description="Scene to apply for the 'scene' action."
+    )
     # Server-written; null until first fired. Optional so older files load.
     last_fired: LastFired | None = None
 
@@ -279,37 +365,90 @@ class Schedule(BaseModel):
     def _validate_days(cls, days: list[int]) -> list[int]:
         return _normalize_days(days)
 
+    @field_validator("at")
+    @classmethod
+    def _validate_at_field(cls, at: str | None) -> str | None:
+        return _validate_at(at)
+
+    @model_validator(mode="after")
+    def _validate_shape(self) -> Schedule:
+        _validate_rule_shape(
+            kind=self.kind,
+            time=self.time,
+            days=self.days,
+            at=self.at,
+            action=self.action,
+            target=self.target,
+            scene_id=self.scene_id,
+        )
+        return self
+
 
 class ScheduleCreate(BaseModel):
     """Fields a client supplies to create a rule; server assigns id/last_fired."""
 
-    kind: Literal["fixed_time"] = "fixed_time"
+    kind: ScheduleKind = "fixed_time"
     enabled: bool = True
-    time: str = Field(pattern=_HHMM)
-    days: list[int]
-    target: ScheduleTarget
-    action: Literal["on", "off"]
+    time: str | None = Field(default=None, pattern=_HHMM)
+    days: list[int] = Field(default_factory=list)
+    offset_minutes: int = 0
+    at: str | None = None
+    target: ScheduleTarget | None = None
+    action: ScheduleAction
+    scene_id: str | None = None
 
     @field_validator("days")
     @classmethod
     def _validate_days(cls, days: list[int]) -> list[int]:
         return _normalize_days(days)
 
+    @field_validator("at")
+    @classmethod
+    def _validate_at_field(cls, at: str | None) -> str | None:
+        return _validate_at(at)
+
+    @model_validator(mode="after")
+    def _validate_shape(self) -> ScheduleCreate:
+        _validate_rule_shape(
+            kind=self.kind,
+            time=self.time,
+            days=self.days,
+            at=self.at,
+            action=self.action,
+            target=self.target,
+            scene_id=self.scene_id,
+        )
+        return self
+
 
 class ScheduleUpdate(BaseModel):
-    """Partial update of a rule; every field is optional (omitted = unchanged)."""
+    """Partial update of a rule; every field is optional (omitted = unchanged).
+
+    Only field-level validation happens here — the route re-validates the merged
+    result through :class:`Schedule`, which applies the cross-field rules — so a
+    patch that would leave a rule incoherent is still rejected.
+    """
 
     enabled: bool | None = None
+    kind: ScheduleKind | None = None
     time: str | None = Field(default=None, pattern=_HHMM)
     days: list[int] | None = None
+    offset_minutes: int | None = None
+    at: str | None = None
     target: ScheduleTarget | None = None
-    action: Literal["on", "off"] | None = None
+    action: ScheduleAction | None = None
+    scene_id: str | None = None
 
     @field_validator("days")
     @classmethod
     def _validate_days(cls, days: list[int] | None) -> list[int] | None:
         # As the other schemas, but tolerate the field being omitted.
         return None if days is None else _normalize_days(days)
+
+    @field_validator("at")
+    @classmethod
+    def _validate_at_field(cls, at: str | None) -> str | None:
+        return _validate_at(at)
 
 
 # ── Scenes ──────────────────────────────────────────────────────────────────

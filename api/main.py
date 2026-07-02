@@ -61,7 +61,14 @@ async def lifespan(app: FastAPI):
         # Fire schedule rules on the local clock, so timers work for both local
         # and cloud devices and keep running with no browser open.
         scheduler = asyncio.create_task(
-            run_scheduler(schedules, registry, groups, broadcaster)
+            run_scheduler(
+                schedules,
+                registry,
+                groups,
+                broadcaster,
+                # Lets sunrise/sunset rules resolve; None (unset) => they don't fire.
+                location=get_settings().location,
+            )
         )
         # Evaluate the alert detectors (reachability + power thresholds) on their
         # own interval; delivers to the in-app ring buffer and optional webhook.

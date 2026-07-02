@@ -6,15 +6,21 @@ from unittest.mock import AsyncMock
 import pytest
 from conftest import FakeChild, FakeDevice
 
-from api import scheduler
+from api import scheduler, solar
 from api.group_store import GroupStore
 from api.kasa_service import DeviceRegistry
 from api.schedule_store import ScheduleStore
+from api.schemas import SceneApplyResult
 
 # Jan 1 2024 is a Monday, so weekday() == 0. Building the instant through
 # ``astimezone`` gives the aware local datetime the scheduler compares against.
 MONDAY_1830 = datetime.datetime(2024, 1, 1, 18, 30).astimezone()
 TUESDAY_1830 = MONDAY_1830 + datetime.timedelta(days=1)
+
+# A real location (New York City) for sunrise/sunset cases. Expected fire minutes
+# are derived from ``solar`` and the machine's local zone, so the tests hold in
+# any timezone rather than hard-coding a wall-clock time.
+NYC = (40.7128, -74.0060)
 
 
 def _rule(**over) -> dict:
@@ -57,6 +63,79 @@ def test_unsupported_kind_skipped():
 def test_due_rules_filters_the_list():
     rules = [_rule(id="a"), _rule(id="b", time="09:00"), _rule(id="c", enabled=False)]
     assert [r["id"] for r in scheduler.due_rules(rules, MONDAY_1830)] == ["a"]
+
+
+# ── Sunrise / sunset rules ────────────────────────────────────────────────────
+
+
+def _sun_local(kind: str, day: datetime.date) -> datetime.datetime:
+    """Today's sunrise/sunset for NYC in the machine's local zone, minute-truncated."""
+    fn = solar.sunrise if kind == "sunrise" else solar.sunset
+    return fn(day, *NYC).astimezone().replace(second=0, microsecond=0)
+
+
+@pytest.mark.parametrize("kind", ["sunrise", "sunset"])
+def test_sun_rule_due_at_computed_local_minute(kind):
+    fire = _sun_local(kind, datetime.date(2024, 6, 21))
+    rule = _rule(kind=kind, days=[fire.weekday()], time=None)
+    assert scheduler.rule_due_at(rule, fire, location=NYC) is True
+    off = fire + datetime.timedelta(minutes=1)
+    assert scheduler.rule_due_at(rule, off, location=NYC) is False
+
+
+def test_sun_rule_never_due_without_location():
+    fire = _sun_local("sunrise", datetime.date(2024, 6, 21))
+    rule = _rule(kind="sunrise", days=[fire.weekday()], time=None)
+    # No location -> the rule silently doesn't fire (the loop warns once).
+    assert scheduler.rule_due_at(rule, fire, location=None) is False
+
+
+def test_sun_rule_offset_shifts_fire_minute():
+    base = _sun_local("sunset", datetime.date(2024, 6, 21))
+    fire = base - datetime.timedelta(minutes=30)
+    rule = _rule(kind="sunset", days=[fire.weekday()], time=None, offset_minutes=-30)
+    assert scheduler.rule_due_at(rule, fire, location=NYC) is True
+    # Without the offset it would be due at ``base``, so it must not be now.
+    assert scheduler.rule_due_at(rule, base, location=NYC) is False
+
+
+def test_sun_rule_respects_weekday():
+    fire = _sun_local("sunrise", datetime.date(2024, 6, 21))
+    other_day = (fire.weekday() + 1) % 7
+    rule = _rule(kind="sunrise", days=[other_day], time=None)
+    assert scheduler.rule_due_at(rule, fire, location=NYC) is False
+
+
+# ── One-shot (once) rules ─────────────────────────────────────────────────────
+
+
+def _once(**over) -> dict:
+    base = {
+        "id": "o1",
+        "kind": "once",
+        "enabled": True,
+        "at": "2024-01-01T18:30",  # matches MONDAY_1830's local wall clock
+        "target": {"type": "device", "id": "10.0.0.1"},
+        "action": "on",
+    }
+    return {**base, **over}
+
+
+def test_once_rule_due_at_its_minute():
+    assert scheduler.rule_due_at(_once(), MONDAY_1830) is True
+
+
+def test_once_rule_not_due_other_minute():
+    assert scheduler.rule_due_at(_once(at="2024-01-01T18:31"), MONDAY_1830) is False
+
+
+def test_once_rule_needs_no_days():
+    # ``once`` has no weekday gate; it fires purely on its ``at`` minute.
+    assert scheduler.rule_due_at(_once(), MONDAY_1830) is True
+
+
+def test_once_rule_bad_at_is_never_due():
+    assert scheduler.rule_due_at(_once(at="not-a-date"), MONDAY_1830) is False
 
 
 # ── Minute cursor / catch-up (drift handling) ─────────────────────────────────
@@ -181,6 +260,72 @@ def test_fire_unknown_room_is_error(registry, groups):
     asyncio.run(go())
 
 
+# ── Scene-action firing (apply_scene is monkeypatched, no real scenes) ─────────
+
+
+def _scene_rule(**over) -> dict:
+    base = {
+        "id": "sc1",
+        "kind": "fixed_time",
+        "enabled": True,
+        "time": "18:30",
+        "days": [0],
+        "action": "scene",
+        "scene_id": "scene-1",
+    }
+    return {**base, **over}
+
+
+def test_fire_scene_rule_calls_apply_scene(registry, groups, monkeypatch):
+    seen = {}
+
+    async def fake_apply(scene_id):
+        seen["id"] = scene_id
+        return SceneApplyResult(succeeded=["d1", "d2"], failed=[])
+
+    monkeypatch.setattr(scheduler, "apply_scene", fake_apply)
+
+    async def go():
+        result = await scheduler.fire_rule(
+            _scene_rule(), registry=registry, groups=groups
+        )
+        assert result == "ok"
+        assert seen["id"] == "scene-1"
+
+    asyncio.run(go())
+
+
+def test_fire_scene_rule_partial_failure(registry, groups, monkeypatch):
+    async def fake_apply(scene_id):
+        return SceneApplyResult(succeeded=["d1"], failed=["d2"])
+
+    monkeypatch.setattr(scheduler, "apply_scene", fake_apply)
+
+    async def go():
+        result = await scheduler.fire_rule(
+            _scene_rule(), registry=registry, groups=groups
+        )
+        assert result == "partial: 1 failed"
+
+    asyncio.run(go())
+
+
+def test_fire_scene_rule_unknown_scene_is_error_not_raise(
+    registry, groups, monkeypatch
+):
+    async def fake_apply(scene_id):
+        raise scheduler.SceneNotFoundError(scene_id)
+
+    monkeypatch.setattr(scheduler, "apply_scene", fake_apply)
+
+    async def go():
+        rule = _scene_rule(scene_id="gone")
+        result = await scheduler.fire_rule(rule, registry=registry, groups=groups)
+        assert result == "error: unknown scene"
+
+    asyncio.run(go())
+
+
 # ── Tick (fire due rules + record + notify) ───────────────────────────────────
 
 
@@ -206,6 +351,54 @@ def test_tick_fires_due_records_and_publishes(registry, groups, tmp_path):
     assert fired["result"] == "ok"
     assert fired["ts"] == int(MONDAY_1830.timestamp())
     broadcaster.publish_now.assert_awaited_once()
+
+
+def test_tick_once_rule_auto_disables_but_is_kept(registry, groups, tmp_path):
+    store = ScheduleStore(tmp_path / "s.json")
+    created = store.create_rule(_once(at="2024-01-01T18:30"))  # due at MONDAY_1830
+    broadcaster = AsyncMock()
+
+    async def go():
+        await scheduler.run_tick(
+            store,
+            MONDAY_1830,
+            registry=registry,
+            groups=groups,
+            broadcaster=broadcaster,
+        )
+
+    asyncio.run(go())
+
+    rule = store.get_rule(created["id"])
+    # Kept (not deleted) so the user sees it ran, but disabled so it won't repeat.
+    assert rule is not None
+    assert rule["enabled"] is False
+    assert rule["last_fired"]["result"] == "ok"
+    assert registry.get("10.0.0.1").is_on is True
+
+
+def test_tick_warns_once_for_sun_rule_without_location(
+    registry, groups, tmp_path, monkeypatch
+):
+    # Reset the module-level guard so the warning path is exercised deterministically.
+    monkeypatch.setattr(scheduler, "_warned_no_location", False)
+    store = ScheduleStore(tmp_path / "s.json")
+    store.create_rule(_rule(kind="sunrise", days=[0], time=None))
+    broadcaster = AsyncMock()
+
+    async def go():
+        await scheduler.run_tick(
+            store,
+            MONDAY_1830,
+            registry=registry,
+            groups=groups,
+            broadcaster=broadcaster,
+        )
+
+    asyncio.run(go())
+    # The guard flips so subsequent ticks don't re-warn; nothing fired.
+    assert scheduler._warned_no_location is True
+    broadcaster.publish_now.assert_not_awaited()
 
 
 def test_tick_with_nothing_due_does_not_publish(registry, groups, tmp_path):

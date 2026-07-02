@@ -125,7 +125,7 @@
 								onclick={startTitleEdit}
 								aria-label="Rename {device.alias}"
 								title="Rename"
-								class="grid h-6 w-6 shrink-0 place-items-center rounded-md text-faint opacity-0 transition-opacity hover:text-muted focus:opacity-100 group-hover:opacity-100"
+								class="grid h-6 w-6 shrink-0 place-items-center rounded-md text-faint transition-colors hover:text-muted"
 							>
 								<Icon name="pencil" size={14} />
 							</button>
@@ -218,7 +218,7 @@
 										onclick={() => startChildEdit(child)}
 										aria-label="Rename {child.alias}"
 										title="Rename"
-										class="grid h-6 w-6 shrink-0 place-items-center rounded-md text-faint opacity-0 transition-opacity hover:text-muted focus:opacity-100 group-hover/outlet:opacity-100"
+										class="grid h-6 w-6 shrink-0 place-items-center rounded-md text-faint transition-colors hover:text-muted"
 									>
 										<Icon name="pencil" size={12} />
 									</button>

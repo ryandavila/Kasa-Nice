@@ -82,3 +82,8 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+filterwarnings = [
+    # FastAPI's TestClient imports httpx via starlette, which Starlette now
+    # deprecates in favor of httpx2. Third-party, nothing for us to fix.
+    "ignore:Using `httpx` with `starlette.testclient` is deprecated",
+]

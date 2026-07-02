@@ -191,6 +191,107 @@ def test_child_power_unknown_child_404(client):
     assert r.status_code == 404
 
 
+# ── Rename (device & outlet) ──────────────────────────────────────────────────
+
+
+def test_rename_device(client):
+    r = client.patch("/api/devices/10.0.0.1", json={"alias": "Desk Lamp"})
+    assert r.status_code == 200
+    assert r.json()["alias"] == "Desk Lamp"
+    # The stable id is MAC/host-based, so it must NOT change with the alias.
+    assert r.json()["id"] == "10.0.0.1"
+
+
+def test_rename_device_trims_whitespace(client):
+    r = client.patch("/api/devices/10.0.0.1", json={"alias": "  Hallway  "})
+    assert r.status_code == 200
+    assert r.json()["alias"] == "Hallway"
+
+
+def test_rename_device_nudges_broadcaster(client, monkeypatch):
+    nudge = AsyncMock()
+    monkeypatch.setattr(routes.broadcaster, "publish_now", nudge)
+    assert (
+        client.patch("/api/devices/10.0.0.1", json={"alias": "New"}).status_code == 200
+    )
+    nudge.assert_awaited_once()
+
+
+def test_rename_unknown_device_404(client):
+    r = client.patch("/api/devices/9.9.9.9", json={"alias": "Nope"})
+    assert r.status_code == 404
+
+
+def test_rename_empty_alias_422(client):
+    assert client.patch("/api/devices/10.0.0.1", json={"alias": ""}).status_code == 422
+
+
+def test_rename_whitespace_only_alias_422(client):
+    # Passes min_length but is not a real label, so the validator rejects it.
+    assert (
+        client.patch("/api/devices/10.0.0.1", json={"alias": "   "}).status_code == 422
+    )
+
+
+def test_rename_child(client):
+    r = client.patch("/api/devices/10.0.0.3/children/Outlet 1", json={"alias": "Lamp"})
+    assert r.status_code == 200
+    aliases = {c["alias"] for c in r.json()["children"]}
+    assert aliases == {"Lamp", "Outlet 2"}
+
+
+def test_rename_unknown_child_404(client):
+    r = client.patch("/api/devices/10.0.0.3/children/Nope", json={"alias": "X"})
+    assert r.status_code == 404
+
+
+def test_local_device_can_rename_flag_true(client):
+    body = client.get("/api/devices").json()
+    plug = next(d for d in body if d["id"] == "10.0.0.1")
+    assert plug["can_rename"] is True
+
+
+def test_cloud_device_reports_cannot_rename_and_rejects_patch(monkeypatch):
+    # A cloud-only device (no set_alias) must advertise can_rename=False and a
+    # rename attempt must fail fast with a 501 — never hang or 500.
+    reg = DeviceRegistry()
+    reg._cloud_devices = {
+        "CLOUDMAC": FakeDevice(
+            "10.0.0.9", alias="Strip", type_name="Strip", renamable=False
+        )
+    }
+    monkeypatch.setattr(routes, "registry", reg)
+    app = FastAPI()
+    app.include_router(routes.router)
+    c = TestClient(app)
+
+    body = c.get("/api/devices").json()
+    assert body[0]["can_rename"] is False
+
+    r = c.patch("/api/devices/CLOUDMAC", json={"alias": "Bench"})
+    assert r.status_code == 501
+
+
+def test_rename_cloud_child_rejected_501(monkeypatch):
+    reg = DeviceRegistry()
+    reg._cloud_devices = {
+        "CLOUDMAC": FakeDevice(
+            "10.0.0.9",
+            alias="Strip",
+            type_name="Strip",
+            renamable=False,
+            children=[FakeChild("Outlet 1", renamable=False)],
+        )
+    }
+    monkeypatch.setattr(routes, "registry", reg)
+    app = FastAPI()
+    app.include_router(routes.router)
+    r = TestClient(app).patch(
+        "/api/devices/CLOUDMAC/children/Outlet 1", json={"alias": "Lamp"}
+    )
+    assert r.status_code == 501
+
+
 def test_usage(client):
     r = client.get("/api/devices/10.0.0.4/usage")
     assert r.status_code == 200

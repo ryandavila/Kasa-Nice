@@ -66,6 +66,16 @@ class EnergyUnsupportedError(LookupError):
     """Raised when a device has no energy-monitoring (emeter) module."""
 
 
+class RenameUnsupportedError(RuntimeError):
+    """Raised when a device/outlet can't be renamed through this API.
+
+    The cloud façade (``CloudDevice``/``CloudChild``) only wires up the passthrough
+    commands we need for power and energy — it exposes no ``set_alias`` — so a
+    rename of a cloud-controlled device is rejected up front rather than silently
+    doing nothing or hanging on an unsupported call.
+    """
+
+
 def stable_device_id(device: KasaDevice) -> str:
     """The durable identity used to key a device, resilient to DHCP IP changes.
 
@@ -620,6 +630,44 @@ class DeviceRegistry:
                 return device
         raise DeviceNotFoundError(f"{device_id}/{child_id}")
 
+    async def set_alias(self, device_id: str, alias: str) -> KasaDevice:
+        """Rename a device, then refresh so the new alias is reflected.
+
+        Renaming is safe against our stable ids precisely because they key on the
+        MAC/device_id, never the alias (see ``stable_device_id``) — so the id the
+        client used stays valid afterwards. Mirrors the control actions: apply,
+        re-read, and let the route nudge the broadcaster. Cloud-only devices have
+        no ``set_alias``, so they're rejected rather than silently no-op'd.
+        """
+        device = self.get(device_id)
+        rename = getattr(device, "set_alias", None)
+        if rename is None:
+            raise RenameUnsupportedError(device_id)
+        await rename(alias)
+        await self._refresh(device)
+        return device
+
+    async def set_child_alias(
+        self, device_id: str, child_id: str, alias: str
+    ) -> KasaDevice:
+        """Rename one outlet of a strip, matched by its stable child id.
+
+        Matches exactly like ``set_child_power`` (stable id, alias fallback for
+        ids saved by an older client). The child's stable id doesn't derive from
+        the alias, so renaming can't change which outlet the id points at. Returns
+        the parent so the whole strip (with the outlet's new name) is serialized.
+        """
+        device = self.get(device_id)
+        for child in device.children:
+            if stable_child_id(child) == child_id or child.alias == child_id:
+                rename = getattr(child, "set_alias", None)
+                if rename is None:
+                    raise RenameUnsupportedError(f"{device_id}/{child_id}")
+                await rename(alias)
+                await self._refresh(device)
+                return device
+        raise DeviceNotFoundError(f"{device_id}/{child_id}")
+
 
 def _cost(kwh: float | None, rate: float | None) -> float | None:
     """Money cost of ``kwh`` at a flat ``rate`` per kWh, rounded to cents.
@@ -708,6 +756,11 @@ def serialize_device(device: KasaDevice) -> Device:
         brightness=brightness,
         hsv=hsv,
         children=children,
+        # Real python-kasa devices/children expose set_alias; the cloud façade
+        # doesn't — so its absence is exactly "this can't be renamed here". A
+        # strip is uniformly local or cloud, so this one flag also gates its
+        # per-outlet rename in the UI.
+        can_rename=hasattr(device, "set_alias"),
     )
 
 

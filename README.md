@@ -66,6 +66,8 @@ All endpoints are under `/api`; interactive docs live at `http://localhost:8080/
 | `POST` | `/api/devices/{id}/brightness` | `{"value": 0-100}` |
 | `POST` | `/api/devices/{id}/color` | `{"hex": "#rrggbb"}` or `{"hsv": [h,s,v]}` |
 | `POST` | `/api/devices/{id}/children/{child}/power` | Toggle one outlet on a strip |
+| `PATCH` | `/api/devices/{id}` | Rename a device (`{"alias": "..."}`); 501 for cloud-only devices (`can_rename: false`) |
+| `PATCH` | `/api/devices/{id}/children/{child}` | Rename one outlet on a strip (`{"alias": "..."}`) |
 | `GET`  | `/api/devices/{id}/usage` | Energy data (live power + daily/monthly history) |
 | `GET`  | `/api/devices/{id}/history` | Recorded history: recent power samples + persisted daily totals |
 | `GET`  | `/api/energy/summary` | Whole-home energy totals across all metered devices (`{total_power_w, today_kwh, month_kwh, today_cost, month_cost, device_count}`) |

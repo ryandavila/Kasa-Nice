@@ -10,6 +10,8 @@ import {
 	setChildPower,
 	setGroupPower,
 	setAllPower,
+	renameDevice,
+	renameChild,
 	ApiError
 } from '$lib/api/client';
 import type { Device, DeviceType, PowerResult } from '$lib/api/types';
@@ -307,6 +309,31 @@ class DeviceStore {
 		} finally {
 			for (const d of devices) this.busy[d.id] = false;
 		}
+	}
+
+	/** Rename a device; optimistically show the new name and revert on failure. */
+	renameDevice(device: Device, alias: string) {
+		const prev = device.alias;
+		device.alias = alias; // optimistic
+		return this.run(
+			device.id,
+			() => renameDevice(device.id, alias),
+			() => (device.alias = prev)
+		);
+	}
+
+	/** Rename one strip outlet; optimistic, reverting the child alias on failure. */
+	renameChild(device: Device, childId: string, alias: string) {
+		const child = device.children.find((c) => c.id === childId);
+		const prev = child?.alias;
+		if (child) child.alias = alias; // optimistic
+		return this.run(
+			device.id,
+			() => renameChild(device.id, childId, alias),
+			() => {
+				if (child && prev !== undefined) child.alias = prev;
+			}
+		);
 	}
 
 	toggleChild(device: Device, childId: string, on: boolean) {

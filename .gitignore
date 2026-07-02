@@ -183,3 +183,8 @@ cython_debug/
 # SvelteKit source library, so re-include it. node_modules and build output are
 # covered by web/.gitignore.
 !web/src/lib/
+
+# Claude Code session state, including agent worktrees under .claude/worktrees/.
+# Must stay ignored so root-level sweeps (ruff format/check from the repo root)
+# do not scan in-progress agent worktrees and fail CI on their transient state.
+/.claude/

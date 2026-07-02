@@ -53,13 +53,28 @@ class FakeEnergy:
 
 
 class FakeChild:
-    def __init__(self, alias: str, is_on: bool = False, device_id: str | None = None):
+    def __init__(
+        self,
+        alias: str,
+        is_on: bool = False,
+        device_id: str | None = None,
+        *,
+        renamable: bool = True,
+    ):
         self.alias = alias
         self.is_on = is_on
         # python-kasa child devices carry a stable ``device_id`` (parent id + slot).
         # Optional so tests can also cover the alias fallback when it's absent.
         if device_id is not None:
             self.device_id = device_id
+        # Real python-kasa children expose set_alias; the cloud façade's CloudChild
+        # doesn't. Assigning it only when renamable lets tests exercise both the
+        # rename path and the cloud-style rejection (hasattr is False otherwise).
+        if renamable:
+            self.set_alias = self._apply_alias
+
+    async def _apply_alias(self, alias: str) -> None:
+        self.alias = alias
 
     async def turn_on(self) -> None:
         self.is_on = True
@@ -90,6 +105,7 @@ class FakeDevice:
         children: list[FakeChild] | None = None,
         fail_update: bool = False,
         mac: str | None = None,
+        renamable: bool = True,
     ):
         self.host = host
         self._fail_update = fail_update
@@ -109,6 +125,14 @@ class FakeDevice:
         if has_energy:
             self.modules[Module.Energy] = FakeEnergy()
         self.update_count = 0
+        # Mirror python-kasa: real devices expose set_alias, the cloud façade does
+        # not. ``renamable=False`` models a cloud-only device so tests can cover
+        # the can_rename=False serialization and the rename-rejection path.
+        if renamable:
+            self.set_alias = self._apply_alias
+
+    async def _apply_alias(self, alias: str) -> None:
+        self.alias = alias
 
     async def update(self) -> None:
         if self._fail_update:

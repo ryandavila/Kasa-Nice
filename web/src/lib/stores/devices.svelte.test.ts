@@ -23,7 +23,9 @@ vi.mock('$lib/api/client', () => {
 		setColorHex: vi.fn(),
 		setChildPower: vi.fn(),
 		setGroupPower: vi.fn(),
-		setAllPower: vi.fn()
+		setAllPower: vi.fn(),
+		renameDevice: vi.fn(),
+		renameChild: vi.fn()
 	};
 });
 
@@ -42,6 +44,8 @@ const setColorHex = client.setColorHex as Mock;
 const setPower = client.setPower as Mock;
 const setGroupPower = client.setGroupPower as Mock;
 const setAllPower = client.setAllPower as Mock;
+const renameDevice = client.renameDevice as Mock;
+const renameChild = client.renameChild as Mock;
 
 function strip(): Device {
 	return {
@@ -56,7 +60,8 @@ function strip(): Device {
 		has_emeter: true,
 		brightness: null,
 		hsv: null,
-		children: [{ id: 'STRIP_00', alias: 'Soldering Iron', is_on: false }]
+		children: [{ id: 'STRIP_00', alias: 'Soldering Iron', is_on: false }],
+		can_rename: true
 	};
 }
 
@@ -74,6 +79,7 @@ function makeDevice(over: Partial<Device> = {}): Device {
 		brightness: 40,
 		hsv: [120, 100, 100],
 		children: [],
+		can_rename: true,
 		...over
 	};
 }
@@ -181,6 +187,43 @@ describe('setGroupPower / setAllPower fan-out', () => {
 		expect(a.is_on).toBe(true); // reverted
 		expect(b.is_on).toBe(true);
 		expect(pushed[0].kind).toBe('error');
+	});
+});
+
+describe('renameDevice optimistic revert', () => {
+	it('applies the new alias optimistically then persists the server value', async () => {
+		const d = makeDevice({ alias: 'Lamp' });
+		deviceStore.devices = [d];
+		renameDevice.mockResolvedValue(makeDevice({ alias: 'Desk Lamp' }));
+		await deviceStore.renameDevice(d, 'Desk Lamp');
+		expect(renameDevice).toHaveBeenCalledWith('10.0.0.1', 'Desk Lamp');
+		expect(deviceStore.devices[0].alias).toBe('Desk Lamp');
+	});
+
+	it('reverts the alias when the request fails', async () => {
+		const d = makeDevice({ alias: 'Lamp' });
+		deviceStore.devices = [d];
+		renameDevice.mockRejectedValue(new Error('offline'));
+		await deviceStore.renameDevice(d, 'Desk Lamp');
+		expect(d.alias).toBe('Lamp'); // reverted
+		expect(pushed[0].kind).toBe('error');
+	});
+});
+
+describe('renameChild optimistic revert', () => {
+	it('sends the parent + stable outlet id and renames optimistically', async () => {
+		const device = strip();
+		renameChild.mockResolvedValue(device);
+		await deviceStore.renameChild(device, 'STRIP_00', 'Lamp');
+		expect(renameChild).toHaveBeenCalledWith('STRIPMAC', 'STRIP_00', 'Lamp');
+		expect(device.children[0].alias).toBe('Lamp');
+	});
+
+	it('reverts the outlet alias when the request fails', async () => {
+		const device = strip();
+		renameChild.mockRejectedValue(new Error('offline'));
+		await deviceStore.renameChild(device, 'STRIP_00', 'Lamp');
+		expect(device.children[0].alias).toBe('Soldering Iron'); // reverted
 	});
 });
 

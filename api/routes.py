@@ -2,6 +2,7 @@ import asyncio
 import time
 
 from fastapi import APIRouter, HTTPException
+from kasa.exceptions import KasaException
 
 from .energy_history import history
 from .events import broadcaster
@@ -9,6 +10,7 @@ from .group_store import groups
 from .kasa_service import (
     DeviceNotFoundError,
     EnergyUnsupportedError,
+    RenameUnsupportedError,
     _cost,
     hex_to_hsv,
     registry,
@@ -30,6 +32,7 @@ from .schemas import (
     GroupUpdate,
     PowerRequest,
     PowerResult,
+    RenameRequest,
     ServerConfig,
     ServerStatus,
     SubnetScanRequest,
@@ -214,6 +217,52 @@ async def set_child_power(device_id: str, child_id: str, req: PowerRequest) -> D
         raise HTTPException(
             status_code=404, detail=f"Unknown child: {device_id}/{child_id}"
         ) from None
+    await broadcaster.publish_now()
+    return serialize_device(device)
+
+
+@router.patch("/devices/{device_id}", response_model=Device)
+async def rename_device(device_id: str, req: RenameRequest) -> Device:
+    """Rename a device, pushing the new name to connected clients immediately.
+
+    404 for an unknown id; 501 for cloud-only devices that can't be renamed via
+    this API (the frontend hides the affordance via ``can_rename``, but a direct
+    call is still rejected cleanly rather than hanging or 500ing). A device I/O
+    failure maps to the same ``{detail}`` shape the control endpoints return.
+    """
+    try:
+        device = await registry.set_alias(device_id, req.alias)
+    except DeviceNotFoundError:
+        raise HTTPException(
+            status_code=404, detail=f"Unknown device: {device_id}"
+        ) from None
+    except RenameUnsupportedError:
+        raise HTTPException(
+            status_code=501,
+            detail=f"Device cannot be renamed through the app: {device_id}",
+        ) from None
+    except KasaException as e:
+        raise HTTPException(status_code=502, detail=f"Device error: {e}") from None
+    await broadcaster.publish_now()
+    return serialize_device(device)
+
+
+@router.patch("/devices/{device_id}/children/{child_id}", response_model=Device)
+async def rename_child(device_id: str, child_id: str, req: RenameRequest) -> Device:
+    """Rename one outlet of a strip; see ``rename_device`` for the error shape."""
+    try:
+        device = await registry.set_child_alias(device_id, child_id, req.alias)
+    except DeviceNotFoundError:
+        raise HTTPException(
+            status_code=404, detail=f"Unknown child: {device_id}/{child_id}"
+        ) from None
+    except RenameUnsupportedError:
+        raise HTTPException(
+            status_code=501,
+            detail=f"Outlet cannot be renamed through the app: {device_id}/{child_id}",
+        ) from None
+    except KasaException as e:
+        raise HTTPException(status_code=502, detail=f"Device error: {e}") from None
     await broadcaster.publish_now()
     return serialize_device(device)
 

@@ -104,6 +104,16 @@ export const setChildPower = (id: string, childId: string, on: boolean) =>
 		on
 	});
 
+/** Rename a device; returns the updated device (new alias, unchanged id). */
+export const renameDevice = (id: string, alias: string) =>
+	patch<Device>(`/devices/${encodeURIComponent(id)}`, { alias });
+
+/** Rename one outlet of a strip; returns the updated parent device. */
+export const renameChild = (id: string, childId: string, alias: string) =>
+	patch<Device>(`/devices/${encodeURIComponent(id)}/children/${encodeURIComponent(childId)}`, {
+		alias
+	});
+
 /** Switch every device in a room at once; reports per-device success/failure. */
 export const setGroupPower = (id: string, on: boolean) =>
 	post<PowerResult>(`/groups/${encodeURIComponent(id)}/power`, { on });

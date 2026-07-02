@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 Hsv = tuple[int, int, int]
 
@@ -29,6 +29,12 @@ class Device(BaseModel):
     brightness: int | None = None
     hsv: Hsv | None = None
     children: list[ChildPlug] = Field(default_factory=list)
+    can_rename: bool = Field(
+        default=True,
+        description="Whether this device (and its outlets) can be renamed through "
+        "the API. False for cloud-only devices (e.g. HS300 strips) whose façade "
+        "has no set_alias; the UI hides the rename affordance for them.",
+    )
 
 
 class UsageStat(BaseModel):
@@ -144,6 +150,27 @@ class PowerResult(BaseModel):
     on: bool
     succeeded: list[str] = Field(default_factory=list)
     failed: list[str] = Field(default_factory=list)
+
+
+class RenameRequest(BaseModel):
+    """A new display name for a device or one strip outlet.
+
+    Trimmed and required non-empty: a blank or whitespace-only alias would leave
+    the device unlabelable in the UI (and the underlying set_alias would persist
+    the emptiness to the hardware). Capped well above any sensible name so it's a
+    guard against unbounded input reaching the device, not a real-world limit.
+    """
+
+    alias: str = Field(min_length=1, max_length=60)
+
+    @field_validator("alias")
+    @classmethod
+    def _trimmed_nonempty(cls, v: str) -> str:
+        # Reject whitespace-only names, which pass min_length but aren't a label.
+        v = v.strip()
+        if not v:
+            raise ValueError("alias must not be blank")
+        return v
 
 
 class BrightnessRequest(BaseModel):

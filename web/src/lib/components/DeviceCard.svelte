@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { Device } from '$lib/api/types';
+	import type { ChildPlug, Device } from '$lib/api/types';
 	import { deviceStore } from '$lib/stores/devices.svelte';
 	import { groupStore } from '$lib/stores/groups.svelte';
 	import Icon from './Icon.svelte';
@@ -21,6 +21,49 @@
 
 	const fav = $derived(groupStore.isFavorite(device.id));
 	const roomId = $derived(groupStore.groupOf(device.id)?.id ?? '');
+
+	// ── Inline rename ──────────────────────────────────────────────────────────
+	// Enter or blur saves; Escape cancels. Cancelling resets the draft to the
+	// current name first, so the blur that fires as the input unmounts is a no-op.
+	let editingTitle = $state(false);
+	let titleDraft = $state('');
+	// The stable id of the outlet being renamed, or null when none is.
+	let editingChildId = $state<string | null>(null);
+	let childDraft = $state('');
+
+	function startTitleEdit() {
+		titleDraft = device.alias;
+		editingTitle = true;
+	}
+	function commitTitle() {
+		const name = titleDraft.trim();
+		if (name && name !== device.alias) deviceStore.renameDevice(device, name);
+		editingTitle = false;
+	}
+	function cancelTitle() {
+		titleDraft = device.alias; // makes the unmount-blur commit a no-op
+		editingTitle = false;
+	}
+
+	function startChildEdit(child: ChildPlug) {
+		childDraft = child.alias;
+		editingChildId = child.id;
+	}
+	function commitChild(child: ChildPlug) {
+		const name = childDraft.trim();
+		if (name && name !== child.alias) deviceStore.renameChild(device, child.id, name);
+		editingChildId = null;
+	}
+	function cancelChild(child: ChildPlug) {
+		childDraft = child.alias;
+		editingChildId = null;
+	}
+
+	/** Focus (and select) an inline-rename input the moment it appears. */
+	function focusSelect(node: HTMLInputElement) {
+		node.focus();
+		node.select();
+	}
 </script>
 
 <article
@@ -46,9 +89,42 @@
 		</div>
 
 		<div class="min-w-0 grow">
-			<h3 class="truncate font-display text-lg font-semibold leading-tight text-ink">
-				{device.alias}
-			</h3>
+			{#if editingTitle}
+				<input
+					use:focusSelect
+					bind:value={titleDraft}
+					aria-label="Rename {device.alias}"
+					maxlength="60"
+					onblur={commitTitle}
+					onkeydown={(e) => {
+						if (e.key === 'Enter') {
+							e.preventDefault();
+							commitTitle();
+						} else if (e.key === 'Escape') {
+							e.preventDefault();
+							cancelTitle();
+						}
+					}}
+					class="w-full rounded-lg border border-accent/50 bg-raised px-2 py-0.5 font-display text-lg font-semibold leading-tight text-ink outline-none focus:border-accent"
+				/>
+			{:else}
+				<h3
+					class="flex items-center gap-1.5 font-display text-lg font-semibold leading-tight text-ink"
+				>
+					<span class="truncate">{device.alias}</span>
+					{#if device.can_rename}
+						<button
+							type="button"
+							onclick={startTitleEdit}
+							aria-label="Rename {device.alias}"
+							title="Rename"
+							class="grid h-6 w-6 shrink-0 place-items-center rounded-md text-faint opacity-0 transition-opacity hover:text-muted focus:opacity-100 group-hover:opacity-100"
+						>
+							<Icon name="pencil" size={14} />
+						</button>
+					{/if}
+				</h3>
+			{/if}
 			<p class="mt-0.5 truncate font-mono text-[11px] tracking-tight text-faint">{meta}</p>
 			{#if isStrip}
 				<p class="mt-1 text-xs font-medium text-muted">
@@ -102,11 +178,42 @@
 	{#if isStrip}
 		<ul class="mt-4 divide-y divide-line border-t border-line">
 			{#each device.children as child (child.id)}
-				<li class="flex items-center justify-between gap-3 py-2.5">
-					<span class="flex items-center gap-2 truncate text-sm text-ink">
-						<Icon name="bolt" size={14} class={child.is_on ? 'text-accent-ink' : 'text-faint'} />
-						<span class="truncate">{child.alias}</span>
-					</span>
+				<li class="group/outlet flex items-center justify-between gap-3 py-2.5">
+					{#if editingChildId === child.id}
+						<input
+							use:focusSelect
+							bind:value={childDraft}
+							aria-label="Rename {child.alias}"
+							maxlength="60"
+							onblur={() => commitChild(child)}
+							onkeydown={(e) => {
+								if (e.key === 'Enter') {
+									e.preventDefault();
+									commitChild(child);
+								} else if (e.key === 'Escape') {
+									e.preventDefault();
+									cancelChild(child);
+								}
+							}}
+							class="min-w-0 grow rounded-md border border-accent/50 bg-raised px-2 py-0.5 text-sm text-ink outline-none focus:border-accent"
+						/>
+					{:else}
+						<span class="flex min-w-0 items-center gap-2 text-sm text-ink">
+							<Icon name="bolt" size={14} class={child.is_on ? 'text-accent-ink' : 'text-faint'} />
+							<span class="truncate">{child.alias}</span>
+							{#if device.can_rename}
+								<button
+									type="button"
+									onclick={() => startChildEdit(child)}
+									aria-label="Rename {child.alias}"
+									title="Rename"
+									class="grid h-6 w-6 shrink-0 place-items-center rounded-md text-faint opacity-0 transition-opacity hover:text-muted focus:opacity-100 group-hover/outlet:opacity-100"
+								>
+									<Icon name="pencil" size={12} />
+								</button>
+							{/if}
+						</span>
+					{/if}
 					<Toggle
 						size="sm"
 						checked={child.is_on}

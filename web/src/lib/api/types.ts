@@ -32,6 +32,11 @@ export interface Device {
 	hsv: Hsv | null;
 	/** Individually controllable outlets, for power strips. */
 	children: ChildPlug[];
+	/**
+	 * Whether this device (and its outlets) can be renamed via the API. False for
+	 * cloud-only devices (e.g. HS300 strips); the UI hides the rename affordance.
+	 */
+	can_rename: boolean;
 }
 
 /** One bar in an energy chart — a day or a month. */

@@ -35,6 +35,13 @@ class Device(BaseModel):
         "the API. False for cloud-only devices (e.g. HS300 strips) whose façade "
         "has no set_alias; the UI hides the rename affordance for them.",
     )
+    reachable: bool = Field(
+        default=True,
+        description="False for a known device that didn't answer discovery: it's "
+        "shown from its last-known snapshot (or host-only identity) as a grayed, "
+        "non-interactive card so it doesn't silently vanish from rooms/favorites. "
+        "Defaults True so every live device and existing consumer is unaffected.",
+    )
 
 
 class UsageStat(BaseModel):

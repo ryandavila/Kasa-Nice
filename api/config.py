@@ -80,6 +80,10 @@ class Settings(BaseSettings):
 
     # ── Persistence paths (mount these as volumes to survive rebuilds) ────────
     kasa_state_file: Path = Path("data/known_devices.json")
+    # Last-known identity of every device that has been read, so a device that
+    # later drops off discovery is still shown (grayed, non-interactive) instead
+    # of vanishing from its rooms/favorites. Sits beside the host store.
+    kasa_snapshot_file: Path = Path("data/device_snapshots.json")
     kasa_groups_file: Path = Path("data/groups.json")
     kasa_energy_history_file: Path = Path("data/energy_history.db")
 

@@ -26,6 +26,11 @@ class FakeRegistry:
         self.refresh_count += 1
         return self.all()
 
+    def unreachable_devices(self) -> list:
+        # The broadcaster appends these to every frame; this fake serves only live
+        # devices, so there are none.
+        return []
+
 
 @pytest.fixture
 def fake_registry(monkeypatch):

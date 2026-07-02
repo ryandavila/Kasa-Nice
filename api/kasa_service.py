@@ -21,7 +21,7 @@ from .cloud_service import (
     load_cloud_client,
 )
 from .config import Settings, get_settings
-from .device_store import HostStore
+from .device_store import DeviceSnapshotStore, HostStore
 from .energy_history import EnergyHistoryStore, history
 from .group_store import GroupStore, groups
 from .logging_config import get_logger
@@ -113,6 +113,7 @@ class DeviceRegistry:
         store: HostStore | None = None,
         credentials: Credentials | None = None,
         *,
+        snapshot_store: DeviceSnapshotStore | None = None,
         cloud_client: KasaCloudClient | None = None,
         cloud_models: tuple[str, ...] = (),
         scan_subnet: str | None = None,
@@ -139,6 +140,20 @@ class DeviceRegistry:
         self._cloud_poll_interval = cloud_poll_interval
         self._last_cloud_refresh: float = float("-inf")
         self._store = store
+        # Last-known identity of every device we've successfully read, keyed by the
+        # host it was read at. Lets a device that later stops answering discovery
+        # be shown (grayed, reachable=False) from its snapshot instead of vanishing
+        # from its rooms/favorites. Held in memory (write-through on persist) so the
+        # hot path — serializing unreachable devices into every SSE frame — never
+        # touches disk. Seeded from the store so snapshots survive a restart.
+        self._snapshot_store = snapshot_store
+        self._snapshots: dict[str, Device] = {}
+        if snapshot_store is not None:
+            for host, raw in snapshot_store.load().items():
+                try:
+                    self._snapshots[host] = Device(**raw)
+                except Exception as e:  # noqa: BLE001 - a bad record must not break startup
+                    logger.warning(f"Ignoring unreadable snapshot for {host}: {e}")
         # Passed to every Discover.discover() call. Newer SMART-protocol devices
         # authenticate before discovery; None (no creds) leaves legacy plugs
         # working and is equivalent to omitting the argument.
@@ -263,6 +278,12 @@ class DeviceRegistry:
         # Now that the (host, stable-id) pair is known, fold any IP-keyed history
         # or room/favorite data onto the stable id (once per device per process).
         self._migrate_identity(device.host, stable_id)
+        # Refresh the last-known snapshot while the device is readable, so if it
+        # later drops off discovery we can still show its identity. Kept in memory;
+        # flushed to disk by ``_persist`` at the end of the discovery pass (rather
+        # than here) so a 254-host subnet sweep doesn't rewrite the file per device.
+        if self._snapshot_store is not None:
+            self._snapshots[device.host] = self._snapshot_of(device)
 
     def _persist(self) -> None:
         """Save the union of known and currently-cached hosts.
@@ -273,6 +294,12 @@ class DeviceRegistry:
         if self._store is None:
             return
         self._store.save(self._store.load() | self._hosts())
+        # Flush the in-memory identity snapshots gathered this pass alongside the
+        # host list, so an unreachable device can be reconstructed after a restart.
+        if self._snapshot_store is not None:
+            self._snapshot_store.save(
+                {host: snap.model_dump() for host, snap in self._snapshots.items()}
+            )
 
     async def _probe_host(self, host: str) -> None:
         """Re-attach a single known host, tolerating failure (it may be offline)."""
@@ -435,6 +462,84 @@ class DeviceRegistry:
 
     def all(self) -> list[KasaDevice]:
         return list(self._devices.values()) + list(self._cloud_devices.values())
+
+    def _snapshot_of(self, device: KasaDevice) -> Device:
+        """A neutralized identity snapshot of a currently-readable device.
+
+        Reuses ``serialize_device`` for the identity fields (id, alias, model,
+        host, device_type, child ids/aliases) but blanks the volatile live state:
+        a device served later from this snapshot is *unreachable*, so implying a
+        stale on/brightness/color reading (or that it still has a working light or
+        emeter) would be wrong. ``reachable`` is False to make that explicit.
+        """
+        live = serialize_device(device)
+        return live.model_copy(
+            update={
+                "reachable": False,
+                "is_on": False,
+                "is_color": False,
+                "is_dimmable": False,
+                "has_emeter": False,
+                "brightness": None,
+                "hsv": None,
+                "children": [
+                    child.model_copy(update={"is_on": False}) for child in live.children
+                ],
+            }
+        )
+
+    @staticmethod
+    def _host_only_snapshot(host: str) -> Device:
+        """Fallback identity for a persisted host we've never successfully read.
+
+        With no snapshot there's no MAC and no alias, so we surface the host as
+        both. The id is the host itself: ``stable_device_id`` already falls back to
+        the host when a device reports no MAC, so this is exactly the id a legacy
+        (MAC-less) device would get once read — keeping any room/favorite keyed to
+        it stable. For a SMART device that will ultimately key by MAC it's a
+        best-effort placeholder until the first successful read supplies a
+        snapshot; it's deterministic so repeated frames don't churn the id.
+        """
+        return Device(
+            id=host,
+            alias=host,
+            host=host,
+            model="",
+            device_type="Unknown",
+            is_on=False,
+            is_color=False,
+            is_dimmable=False,
+            has_emeter=False,
+            reachable=False,
+        )
+
+    def unreachable_devices(self) -> list[Device]:
+        """Known devices that aren't currently live, as ``reachable=False`` entries.
+
+        A persisted host with no cached device (offline, or failed the last
+        discovery) would otherwise disappear from the UI while still occupying
+        rooms and favorites — leaving phantom membership. So for each such host we
+        emit its last-known snapshot (or a host-only placeholder) so it stays
+        visible as a grayed, non-interactive card. Never touches the network, so
+        it's safe to call on every SSE frame.
+
+        A device that merely changed IP is live under its stable id at the *new*
+        host while its old IP lingers in the host store; emitting the old host too
+        would fork it into a phantom twin, so entries whose id is already live are
+        skipped.
+        """
+        if self._store is None:
+            return []
+        live = self.all()
+        live_hosts = {d.host for d in live}
+        live_ids = {stable_device_id(d) for d in live}
+        result: list[Device] = []
+        for host in sorted(self._store.load() - live_hosts):
+            snapshot = self._snapshots.get(host) or self._host_only_snapshot(host)
+            if snapshot.id in live_ids:
+                continue
+            result.append(snapshot)
+        return result
 
     def get(self, device_id: str) -> KasaDevice:
         device = self._devices.get(device_id) or self._cloud_devices.get(device_id)
@@ -790,6 +895,9 @@ _cloud = load_cloud_client(_settings)
 registry = DeviceRegistry(
     HostStore(_settings.kasa_state_file),
     _load_credentials(_settings),
+    # Persisted beside the host store; lets known-but-offline devices stay visible
+    # (grayed) instead of vanishing from their rooms/favorites.
+    snapshot_store=DeviceSnapshotStore(_settings.kasa_snapshot_file),
     cloud_client=_cloud[0] if _cloud else None,
     cloud_models=_cloud[1] if _cloud else (),
     scan_subnet=_settings.kasa_scan_subnet,

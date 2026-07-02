@@ -45,6 +45,7 @@ def test_defaults_match_readme(monkeypatch):
     assert s.kasa_host == "127.0.0.1"
     assert s.kasa_port == 8080
     assert s.kasa_state_file == Path("data/known_devices.json")
+    assert s.kasa_snapshot_file == Path("data/device_snapshots.json")
     assert s.kasa_groups_file == Path("data/groups.json")
     assert s.kasa_energy_history_file == Path("data/energy_history.db")
     assert s.kasa_energy_sample_interval == 300.0

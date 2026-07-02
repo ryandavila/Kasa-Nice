@@ -38,6 +38,7 @@ vi.mock('./toasts.svelte', () => ({
 import * as client from '$lib/api/client';
 import { deviceStore } from './devices.svelte';
 
+const discoverDevices = client.discoverDevices as Mock;
 const setChildPower = client.setChildPower as Mock;
 const setBrightness = client.setBrightness as Mock;
 const setColorHex = client.setColorHex as Mock;
@@ -60,6 +61,7 @@ function strip(): Device {
 		has_emeter: true,
 		brightness: null,
 		hsv: null,
+		reachable: true,
 		children: [{ id: 'STRIP_00', alias: 'Soldering Iron', is_on: false }],
 		can_rename: true
 	};
@@ -78,6 +80,7 @@ function makeDevice(over: Partial<Device> = {}): Device {
 		has_emeter: false,
 		brightness: 40,
 		hsv: [120, 100, 100],
+		reachable: true,
 		children: [],
 		can_rename: true,
 		...over
@@ -206,6 +209,41 @@ describe('renameDevice optimistic revert', () => {
 		renameDevice.mockRejectedValue(new Error('offline'));
 		await deviceStore.renameDevice(d, 'Desk Lamp');
 		expect(d.alias).toBe('Lamp'); // reverted
+		expect(pushed[0].kind).toBe('error');
+	});
+});
+
+describe('retryDevice', () => {
+	it('replaces an unreachable placeholder with the live device it comes back as', async () => {
+		// A never-read host is keyed by its host; its live identity keys by MAC, so
+		// the two would coexist unless the stale placeholder is dropped on recovery.
+		const placeholder = makeDevice({
+			id: '10.0.0.5',
+			host: '10.0.0.5',
+			alias: '10.0.0.5',
+			reachable: false
+		});
+		deviceStore.devices = [placeholder];
+		const live = makeDevice({ id: 'AABBCC', host: '10.0.0.5', alias: 'Lamp', reachable: true });
+		discoverDevices.mockResolvedValue([live]);
+
+		await deviceStore.retryDevice(placeholder);
+
+		expect(discoverDevices).toHaveBeenCalledWith('10.0.0.5');
+		expect(deviceStore.devices).toHaveLength(1); // placeholder gone, not duplicated
+		expect(deviceStore.devices[0].id).toBe('AABBCC');
+		expect(deviceStore.devices[0].reachable).toBe(true);
+	});
+
+	it('keeps the card and toasts when the device is still unreachable', async () => {
+		const placeholder = makeDevice({ id: '10.0.0.5', host: '10.0.0.5', reachable: false });
+		deviceStore.devices = [placeholder];
+		discoverDevices.mockResolvedValue([]); // nothing answered
+
+		await deviceStore.retryDevice(placeholder);
+
+		expect(deviceStore.devices).toHaveLength(1); // still shown
+		expect(deviceStore.devices[0].reachable).toBe(false);
 		expect(pushed[0].kind).toBe('error');
 	});
 });

@@ -85,19 +85,28 @@ async def status() -> ServerStatus:
 
 @router.get("/devices", response_model=list[Device])
 async def list_devices() -> list[Device]:
-    return [serialize_device(d) for d in registry.all()]
+    # Append known-but-unreachable devices so they stay visible (grayed) in the UI
+    # rather than silently disappearing from their rooms and favorites.
+    return [
+        serialize_device(d) for d in registry.all()
+    ] + registry.unreachable_devices()
 
 
 @router.get("/state", response_model=list[Device])
 async def state() -> list[Device]:
     """Cached devices with live state refreshed from the hardware."""
-    return [serialize_device(d) for d in await registry.refresh_all()]
+    live = [serialize_device(d) for d in await registry.refresh_all()]
+    return live + registry.unreachable_devices()
 
 
 @router.post("/discover", response_model=list[Device])
 async def discover(req: DiscoverRequest) -> list[Device]:
     if req.target:
         devices = await registry.discover_target(req.target)
+        # A previously-unreachable host that just answered flips to reachable; push
+        # the fresh frame so every client's grayed card updates without waiting for
+        # the next tick (the retry affordance relies on this).
+        await broadcaster.publish_now()
         return [serialize_device(d) for d in devices]
     # Broadcast re-discovery from the UI's "Discover" button: refresh cloud-only
     # devices too (e.g. an HS300 strip onboarded after startup), so they appear

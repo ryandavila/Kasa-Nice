@@ -4,7 +4,7 @@ import pytest
 from conftest import FakeChild, FakeDevice, FakeDiscover
 
 from api import kasa_service
-from api.device_store import HostStore
+from api.device_store import DeviceSnapshotStore, HostStore
 from api.energy_history import EnergyHistoryStore
 from api.group_store import GroupStore
 from api.kasa_service import (
@@ -422,6 +422,135 @@ def test_migration_runs_at_most_once_per_process(tmp_path, fake_discover):
     asyncio.run(reg.discover_all())
 
     assert gs.get_favorites() == ["10.0.0.5"]
+
+
+# ── known-but-unreachable devices stay visible ───────────────────────────────
+
+
+def _reg_with_stores(tmp_path) -> DeviceRegistry:
+    return DeviceRegistry(
+        HostStore(tmp_path / "hosts.json"),
+        snapshot_store=DeviceSnapshotStore(tmp_path / "snap.json"),
+    )
+
+
+def test_serialize_marks_live_device_reachable():
+    # Existing consumers rely on live devices defaulting to reachable=True.
+    assert serialize_device(FakeDevice("10.0.0.2")).reachable is True
+
+
+def test_unreachable_device_served_from_snapshot(tmp_path, fake_discover):
+    # A device is read once (so a snapshot is stored), then a re-scan finds nothing.
+    fake_discover.broadcast = {
+        "10.0.0.5": FakeDevice("10.0.0.5", alias="Lamp", model="HS100")
+    }
+    reg = _reg_with_stores(tmp_path)
+    asyncio.run(reg.discover_all())
+
+    fake_discover.broadcast = {}  # the device drops off the network
+    asyncio.run(reg.discover_all())
+
+    assert "10.0.0.5" not in reg._devices  # no longer live
+    unreachable = reg.unreachable_devices()
+    assert [d.host for d in unreachable] == ["10.0.0.5"]
+    assert unreachable[0].alias == "Lamp"  # identity from the snapshot
+    assert unreachable[0].model == "HS100"
+    assert unreachable[0].reachable is False
+
+
+def test_unreachable_snapshot_keeps_stable_mac_id(tmp_path, fake_discover):
+    # The snapshot must carry the SAME stable id as the live device, so rooms and
+    # favorites keyed to it still match while it's offline.
+    fake_discover.broadcast = {
+        "10.0.0.5": FakeDevice("10.0.0.5", mac="AA:BB:CC:DD:EE:01")
+    }
+    reg = _reg_with_stores(tmp_path)
+    asyncio.run(reg.discover_all())
+    fake_discover.broadcast = {}
+    asyncio.run(reg.discover_all())
+
+    assert [d.id for d in reg.unreachable_devices()] == ["AABBCCDDEE01"]
+
+
+def test_unreachable_snapshot_survives_a_restart(tmp_path, fake_discover):
+    # A fresh registry (new process) seeds snapshots from disk, so a host that's
+    # offline at startup is still shown from its last-known identity.
+    fake_discover.broadcast = {"10.0.0.5": FakeDevice("10.0.0.5", alias="Lamp")}
+    reg = _reg_with_stores(tmp_path)
+    asyncio.run(reg.discover_all())
+
+    fake_discover.broadcast = {}
+    reg2 = _reg_with_stores(tmp_path)  # simulate a restart against the same files
+    asyncio.run(reg2.discover_all())
+
+    unreachable = reg2.unreachable_devices()
+    assert [d.alias for d in unreachable] == ["Lamp"]  # restored from disk
+
+
+def test_never_read_host_falls_back_to_host_identity(tmp_path, fake_discover):
+    # A host persisted by a previous session that never answered: no snapshot, so
+    # host-only identity with the host as a deterministic placeholder id.
+    store = HostStore(tmp_path / "hosts.json")
+    store.save({"10.0.0.9"})
+    fake_discover.broadcast = {}
+    reg = DeviceRegistry(store, snapshot_store=DeviceSnapshotStore(tmp_path / "s.json"))
+    asyncio.run(reg.discover_all())
+
+    unreachable = reg.unreachable_devices()
+    assert len(unreachable) == 1
+    assert unreachable[0].id == "10.0.0.9"
+    assert unreachable[0].alias == "10.0.0.9"
+    assert unreachable[0].device_type == "Unknown"
+    assert unreachable[0].reachable is False
+
+
+def test_ip_change_does_not_emit_a_phantom_unreachable_twin(tmp_path, fake_discover):
+    # The device is live at a new IP under its stable MAC id; its old IP lingers in
+    # the host store but must NOT surface as a separate unreachable device.
+    reg = _reg_with_stores(tmp_path)
+    fake_discover.broadcast = {
+        "10.0.0.5": FakeDevice("10.0.0.5", mac="AA:BB:CC:DD:EE:01")
+    }
+    asyncio.run(reg.discover_all())
+    fake_discover.broadcast = {
+        "10.0.0.9": FakeDevice("10.0.0.9", mac="AA:BB:CC:DD:EE:01")
+    }
+    asyncio.run(reg.discover_all())
+
+    assert reg.unreachable_devices() == []  # no twin for the stale 10.0.0.5
+
+
+def test_control_on_unreachable_id_fails_cleanly(tmp_path, fake_discover):
+    # An unreachable device isn't in the registry, so control raises immediately
+    # (a clean 404 at the route) rather than hanging on a network timeout.
+    fake_discover.broadcast = {"10.0.0.5": FakeDevice("10.0.0.5", alias="Lamp")}
+    reg = _reg_with_stores(tmp_path)
+    asyncio.run(reg.discover_all())
+    fake_discover.broadcast = {}
+    asyncio.run(reg.discover_all())
+
+    unreachable_id = reg.unreachable_devices()[0].id
+    with pytest.raises(DeviceNotFoundError):
+        asyncio.run(reg.set_power(unreachable_id, True))
+
+
+def test_recovery_flips_unreachable_back_to_reachable(tmp_path, fake_discover):
+    # Probing the host again (the retry path) makes it live and clears it from the
+    # unreachable list.
+    fake_discover.broadcast = {"10.0.0.5": FakeDevice("10.0.0.5", alias="Lamp")}
+    reg = _reg_with_stores(tmp_path)
+    asyncio.run(reg.discover_all())
+    fake_discover.broadcast = {}
+    asyncio.run(reg.discover_all())
+    assert reg.unreachable_devices()  # currently offline
+
+    # The device answers a single-target probe again.
+    fake_discover.targets["10.0.0.5"] = {"10.0.0.5": FakeDevice("10.0.0.5")}
+    asyncio.run(reg.discover_target("10.0.0.5"))
+
+    assert "10.0.0.5" in reg._devices
+    assert reg.unreachable_devices() == []
+    assert serialize_device(reg.get("10.0.0.5")).reachable is True
 
 
 def test_migration_never_crashes_discovery(tmp_path, fake_discover):

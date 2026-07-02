@@ -21,6 +21,7 @@
 		| 'plus'
 		| 'pencil'
 		| 'trash'
+		| 'unreachable'
 		| 'x';
 
 	// 24×24 stroke icons. Each entry is the inner markup of an <svg>.
@@ -52,6 +53,8 @@
 		plus: '<path d="M12 5v14M5 12h14"/>',
 		pencil: '<path d="M4 20h4l10-10-4-4L4 16v4Zm9-13 4 4"/>',
 		trash: '<path d="M4 7h16M9 7V4h6v3m-7 0v13h8V7M10 11v6m4-6v6"/>',
+		unreachable:
+			'<path d="M3 3l18 18M8.5 16.5a5 5 0 0 1 7 0M5 12.9a10 10 0 0 1 4-2.5m6 .2a10 10 0 0 1 4 2.3M2 8.8a15 15 0 0 1 6-3.4m5-.2a15 15 0 0 1 9 3.6M12 20h.01"/>',
 		x: '<path d="M6 6l12 12M18 6 6 18"/>'
 	};
 

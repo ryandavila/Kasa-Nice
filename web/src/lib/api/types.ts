@@ -37,6 +37,13 @@ export interface Device {
 	 * cloud-only devices (e.g. HS300 strips); the UI hides the rename affordance.
 	 */
 	can_rename: boolean;
+	/**
+	 * False for a known device that didn't answer discovery: it's rendered as a
+	 * grayed, non-interactive card (from its last-known snapshot, or host-only
+	 * identity) so it doesn't vanish from its rooms/favorites. Live devices are
+	 * always true; the retry affordance flips it back once the device answers.
+	 */
+	reachable: boolean;
 }
 
 /** One bar in an energy chart — a day or a month. */

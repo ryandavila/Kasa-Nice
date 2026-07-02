@@ -76,6 +76,46 @@ def test_list_devices(client):
     assert {d["id"] for d in body} == {"10.0.0.1", "10.0.0.2", "10.0.0.3", "10.0.0.4"}
 
 
+def _client_with(reg, monkeypatch) -> TestClient:
+    monkeypatch.setattr(routes, "registry", reg)
+    app = FastAPI()
+    app.include_router(routes.router)
+    return TestClient(app)
+
+
+def test_devices_endpoint_includes_unreachable_devices(tmp_path, monkeypatch):
+    from api.device_store import DeviceSnapshotStore, HostStore
+
+    reg = DeviceRegistry(
+        HostStore(tmp_path / "hosts.json"),
+        snapshot_store=DeviceSnapshotStore(tmp_path / "snap.json"),
+    )
+    reg._devices = {"10.0.0.1": FakeDevice("10.0.0.1", alias="Live")}
+    # A persisted host with no live device and no snapshot -> host-only identity.
+    reg._store.save({"10.0.0.1", "10.0.0.9"})
+    client = _client_with(reg, monkeypatch)
+
+    body = client.get("/api/devices").json()
+    by_id = {d["id"]: d for d in body}
+    assert by_id["10.0.0.1"]["reachable"] is True
+    assert by_id["10.0.0.9"]["reachable"] is False  # shown, greyed
+
+
+def test_control_on_unreachable_id_returns_404(tmp_path, monkeypatch):
+    from api.device_store import DeviceSnapshotStore, HostStore
+
+    reg = DeviceRegistry(
+        HostStore(tmp_path / "hosts.json"),
+        snapshot_store=DeviceSnapshotStore(tmp_path / "snap.json"),
+    )
+    reg._store.save({"10.0.0.9"})  # known but never live: unreachable
+    client = _client_with(reg, monkeypatch)
+
+    # Must fail fast with a clean 404, not hang on a network timeout.
+    r = client.post("/api/devices/10.0.0.9/power", json={"on": True})
+    assert r.status_code == 404
+
+
 def test_discover_broadcast_also_refreshes_cloud_devices(monkeypatch):
     # Broadcast discovery (no target) must re-attach cloud devices and return
     # them alongside local ones, so a strip onboarded later appears without a

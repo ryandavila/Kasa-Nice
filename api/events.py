@@ -43,8 +43,15 @@ _KEEPALIVE = ": keepalive\n\n"
 
 
 def _frame(devices: list) -> str:
-    """Encode a device list as one SSE ``data:`` frame."""
-    payload = json.dumps([serialize_device(d).model_dump() for d in devices])
+    """Encode a device list as one SSE ``data:`` frame.
+
+    Known-but-unreachable devices are appended (as ``reachable=False`` entries)
+    so the stream carries them alongside live devices — the frame stays a flat
+    JSON array the client already merges, just extended, never reshaped.
+    """
+    items = [serialize_device(d).model_dump() for d in devices]
+    items += [d.model_dump() for d in registry.unreachable_devices()]
+    payload = json.dumps(items)
     return f"data: {payload}\n\n"
 
 

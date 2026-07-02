@@ -33,6 +33,8 @@ class DeviceStore {
 	error = $state<string | null>(null);
 	/** Device ids with an in-flight request, for per-card busy state. */
 	busy = $state<Record<string, boolean>>({});
+	/** Device ids with an in-flight retry probe, for the unreachable card's pending state. */
+	retrying = $state<Record<string, boolean>>({});
 	/** Whether the last background poll reached the hub. */
 	live = $state(true);
 	/** True while the server's initial network sweep is still running. */
@@ -70,6 +72,9 @@ class DeviceStore {
 			cur.is_on = f.is_on;
 			cur.brightness = f.brightness;
 			cur.hsv = f.hsv;
+			// A device can drop to unreachable (or come back) between frames; keep the
+			// flag current so its card grays out / re-lights in place.
+			cur.reachable = f.reachable;
 			for (const fc of f.children) {
 				const cc = cur.children.find((c) => c.id === fc.id);
 				if (cc) cc.is_on = fc.is_on;
@@ -219,6 +224,31 @@ class DeviceStore {
 		const found = await discoverDevices(target);
 		for (const d of found) this.replace(d);
 		return found;
+	}
+
+	/**
+	 * Re-probe a known-but-unreachable device via the single-target discover API.
+	 * On success it's served live again: drop any stale unreachable placeholder for
+	 * that host (a never-read host is keyed by its host, but its live identity keys
+	 * by MAC, so the two would otherwise coexist) and merge in the fresh device.
+	 * The server also nudges the SSE stream, which settles every other client.
+	 */
+	async retryDevice(device: Device) {
+		this.retrying[device.id] = true;
+		try {
+			const found = await discoverDevices(device.host);
+			if (!found.length) {
+				toasts.push(`${device.alias} still unreachable`, 'error');
+				return;
+			}
+			const hosts = new Set(found.map((d) => d.host));
+			this.devices = this.devices.filter((d) => d.reachable || !hosts.has(d.host));
+			for (const d of found) this.replace(d);
+		} catch (e) {
+			toasts.push(message(e), 'error');
+		} finally {
+			this.retrying[device.id] = false;
+		}
 	}
 
 	/** Unicast-sweep a whole subnet; merges any found devices into the list. */

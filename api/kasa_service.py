@@ -6,10 +6,8 @@ This is the logic that previously lived inside the NiceGUI page handlers in
 
 import asyncio
 import ipaddress
-import os
 import time
 from colorsys import hsv_to_rgb, rgb_to_hsv
-from pathlib import Path
 from typing import Any
 
 from kasa import Credentials, Discover, Module
@@ -22,6 +20,7 @@ from .cloud_service import (
     discover_cloud_devices,
     load_cloud_client,
 )
+from .config import Settings, get_settings
 from .device_store import HostStore
 from .energy_history import EnergyHistoryStore, history
 from .group_store import GroupStore, groups
@@ -712,16 +711,14 @@ def serialize_device(device: KasaDevice) -> Device:
     )
 
 
-def _load_credentials() -> Credentials | None:
-    """Build TP-Link cloud credentials from the environment, if provided.
+def _load_credentials(settings: Settings) -> Credentials | None:
+    """Build TP-Link cloud credentials from settings, if provided.
 
     Newer SMART-protocol devices require these to be discovered or controlled.
     When unset, returns None so legacy plugs keep working without auth.
     """
-    username = os.getenv("TPLINK_USERNAME")
-    password = os.getenv("TPLINK_PASSWORD")
-    if username and password:
-        return Credentials(username, password)
+    if settings.tplink_username and settings.tplink_password:
+        return Credentials(settings.tplink_username, settings.tplink_password)
     logger.warning(
         "TPLINK_USERNAME/TPLINK_PASSWORD not set; only legacy (non-SMART) "
         "devices will be reachable"
@@ -729,52 +726,23 @@ def _load_credentials() -> Credentials | None:
     return None
 
 
-def _load_energy_rate() -> float | None:
-    """Parse the optional flat $/kWh rate (KASA_ENERGY_RATE) from the environment.
-
-    Returns None (cost display off) when unset or not a valid number.
-    """
-    raw = os.getenv("KASA_ENERGY_RATE")
-    if raw is None or not raw.strip():
-        return None
-    try:
-        return float(raw)
-    except ValueError:
-        logger.warning(f"Ignoring invalid KASA_ENERGY_RATE={raw!r}; expected a number")
-        return None
-
-
-# Module-level singleton shared across requests. The host store lives at
-# KASA_STATE_FILE (default ./data/known_devices.json); mount that path as a
-# volume to keep manually-added devices across container rebuilds.
-_STATE_FILE = Path(os.getenv("KASA_STATE_FILE", "data/known_devices.json"))
-_cloud = load_cloud_client()
-
-
-def _load_cloud_poll_interval() -> float:
-    """Seconds between cloud-device refreshes during the state poll.
-
-    Defaults to 30s; falls back to the default on a missing or invalid value.
-    """
-    raw = os.getenv("KASA_CLOUD_POLL_INTERVAL")
-    if raw is None or not raw.strip():
-        return 30.0
-    try:
-        return max(0.0, float(raw))
-    except ValueError:
-        logger.warning(f"Ignoring invalid KASA_CLOUD_POLL_INTERVAL={raw!r}; using 30s")
-        return 30.0
-
+# Module-level singleton shared across requests, built from the shared settings.
+# The host store lives at KASA_STATE_FILE (default ./data/known_devices.json) and
+# the numeric knobs (energy rate, cloud poll interval) come parsed and validated
+# from api.config; mount the state path as a volume to keep manually-added
+# devices across container rebuilds.
+_settings = get_settings()
+_cloud = load_cloud_client(_settings)
 
 registry = DeviceRegistry(
-    HostStore(_STATE_FILE),
-    _load_credentials(),
+    HostStore(_settings.kasa_state_file),
+    _load_credentials(_settings),
     cloud_client=_cloud[0] if _cloud else None,
     cloud_models=_cloud[1] if _cloud else (),
-    scan_subnet=os.getenv("KASA_SCAN_SUBNET"),
-    energy_rate=_load_energy_rate(),
-    energy_currency=os.getenv("KASA_ENERGY_CURRENCY", "$"),
-    cloud_poll_interval=_load_cloud_poll_interval(),
+    scan_subnet=_settings.kasa_scan_subnet,
+    energy_rate=_settings.kasa_energy_rate,
+    energy_currency=_settings.kasa_energy_currency,
+    cloud_poll_interval=_settings.kasa_cloud_poll_interval,
     # Wired in so the one-time lazy migration of IP-keyed rooms/favorites and
     # energy history can fire as devices are (re)discovered.
     group_store=groups,

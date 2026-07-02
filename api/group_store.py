@@ -10,10 +10,10 @@ style of ``HostStore``.
 """
 
 import json
-import os
 import uuid
 from pathlib import Path
 
+from .config import get_settings
 from .logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -151,5 +151,4 @@ class GroupStore:
 # Module-level singleton, mirroring the registry/host-store pattern. Lives at
 # KASA_GROUPS_FILE (default ./data/groups.json); mount that path as a volume to
 # keep rooms and favorites across container rebuilds.
-_GROUPS_FILE = Path(os.getenv("KASA_GROUPS_FILE", "data/groups.json"))
-groups = GroupStore(_GROUPS_FILE)
+groups = GroupStore(get_settings().kasa_groups_file)

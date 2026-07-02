@@ -1,6 +1,5 @@
 import asyncio
 import contextlib
-import os
 from contextlib import asynccontextmanager
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
@@ -9,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
+from .config import get_settings
 from .energy_history import history, load_sample_interval, run_recorder
 from .events import router as events_router
 from .kasa_service import registry
@@ -89,10 +89,9 @@ app = create_app()
 def run() -> None:
     import uvicorn
 
-    host = os.getenv("KASA_HOST", "127.0.0.1")
-    port = int(os.getenv("KASA_PORT", "8080"))
-    logger.info(f"Running on {host}:{port}")
-    uvicorn.run(app, host=host, port=port)
+    settings = get_settings()
+    logger.info(f"Running on {settings.kasa_host}:{settings.kasa_port}")
+    uvicorn.run(app, host=settings.kasa_host, port=settings.kasa_port)
 
 
 if __name__ == "__main__":

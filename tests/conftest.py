@@ -4,7 +4,25 @@ These fakes mimic just the surface of ``python-kasa`` that the service and
 serializer touch, so tests run with no real devices or network.
 """
 
+import pytest
 from kasa import Module
+
+from api import config
+
+
+@pytest.fixture(autouse=True)
+def _isolated_settings():
+    """Keep configuration hermetic across the whole suite.
+
+    A developer's real repo-root ``.env`` must never change test outcomes, so we
+    seed a settings instance built from the process environment only
+    (``_env_file=None``) and drop it afterwards. Any code that reaches for
+    ``get_settings()`` during a test therefore sees a clean, dotenv-free slate;
+    tests that exercise env parsing build their own ``Settings`` and pass it in.
+    """
+    config.set_settings(config.Settings(_env_file=None))
+    yield
+    config.reset_settings()
 
 
 class FakeLight:

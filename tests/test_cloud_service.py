@@ -29,6 +29,7 @@ from api.cloud_service import (
     discover_cloud_devices,
     load_cloud_client,
 )
+from api.config import Settings
 from api.kasa_service import DeviceRegistry, _build_usage
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -452,28 +453,33 @@ def test_discover_skips_device_whose_initial_read_fails():
     assert asyncio.run(discover_cloud_devices(client, models=("HS300",))) == []
 
 
-# ── load_cloud_client (env parsing) ──────────────────────────────────────────
+# ── load_cloud_client (config-driven) ────────────────────────────────────────
+#
+# These build an isolated Settings (``_env_file=None``, no dotenv) and pass it
+# straight in, so no environment mutation leaks between tests and a developer's
+# real .env can't influence them.
 
 
-def test_load_cloud_client_disabled_by_default(monkeypatch):
-    monkeypatch.delenv("KASA_CLOUD_FALLBACK", raising=False)
-    assert load_cloud_client() is None
+def _settings(**overrides) -> Settings:
+    return Settings(_env_file=None, **overrides)
 
 
-def test_load_cloud_client_enabled_without_credentials_returns_none(monkeypatch):
-    monkeypatch.setenv("KASA_CLOUD_FALLBACK", "1")
-    monkeypatch.delenv("TPLINK_USERNAME", raising=False)
-    monkeypatch.delenv("TPLINK_PASSWORD", raising=False)
-    assert load_cloud_client() is None
+def test_load_cloud_client_disabled_by_default():
+    assert load_cloud_client(_settings()) is None
 
 
-def test_load_cloud_client_builds_client_and_default_models(monkeypatch):
-    monkeypatch.setenv("KASA_CLOUD_FALLBACK", "yes")  # truthy variant
-    monkeypatch.setenv("TPLINK_USERNAME", "user@example.com")
-    monkeypatch.setenv("TPLINK_PASSWORD", "secret")
-    monkeypatch.delenv("KASA_CLOUD_MODELS", raising=False)
+def test_load_cloud_client_enabled_without_credentials_returns_none():
+    assert load_cloud_client(_settings(kasa_cloud_fallback="1")) is None
 
-    result = load_cloud_client()
+
+def test_load_cloud_client_builds_client_and_default_models():
+    settings = _settings(
+        kasa_cloud_fallback="yes",  # truthy variant
+        tplink_username="user@example.com",
+        tplink_password="secret",
+    )
+
+    result = load_cloud_client(settings)
 
     assert result is not None
     client, models = result
@@ -482,15 +488,38 @@ def test_load_cloud_client_builds_client_and_default_models(monkeypatch):
     assert models == ("HS300",)
 
 
-def test_load_cloud_client_parses_custom_models(monkeypatch):
-    monkeypatch.setenv("KASA_CLOUD_FALLBACK", "1")
-    monkeypatch.setenv("TPLINK_USERNAME", "user@example.com")
-    monkeypatch.setenv("TPLINK_PASSWORD", "secret")
-    monkeypatch.setenv("KASA_CLOUD_MODELS", "HS300, KP303 ,")
+def test_load_cloud_client_parses_custom_models():
+    settings = _settings(
+        kasa_cloud_fallback="1",
+        tplink_username="user@example.com",
+        tplink_password="secret",
+        kasa_cloud_models="HS300, KP303 ,",
+    )
 
-    _client_obj, models = load_cloud_client()
+    _client_obj, models = load_cloud_client(settings)
 
     assert models == ("HS300", "KP303")
+
+
+@pytest.mark.parametrize("value", ["1", "true", "TRUE", "yes", "on", "On"])
+def test_cloud_fallback_truthy_strings_enable(value):
+    settings = _settings(
+        kasa_cloud_fallback=value,
+        tplink_username="user@example.com",
+        tplink_password="secret",
+    )
+    assert load_cloud_client(settings) is not None
+
+
+@pytest.mark.parametrize("value", ["", "0", "false", "no", "off", "banana"])
+def test_cloud_fallback_non_truthy_strings_disable(value):
+    # Anything outside the historical truthy set is off — never an error.
+    settings = _settings(
+        kasa_cloud_fallback=value,
+        tplink_username="user@example.com",
+        tplink_password="secret",
+    )
+    assert load_cloud_client(settings) is None
 
 
 # ── registry integration with cloud devices ─────────────────────────────────

@@ -26,6 +26,7 @@ dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
     "tzdata==2025.2",
+    "pydantic-settings>=2.14.2",
 ]
 
 [project.optional-dependencies]

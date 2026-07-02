@@ -17,7 +17,6 @@ slot straight into the existing registry, routes, and serializer.
 
 import asyncio
 import json
-import os
 import uuid
 from datetime import datetime, timedelta
 from types import SimpleNamespace
@@ -26,6 +25,7 @@ from typing import Any
 import aiohttp
 from kasa import Module
 
+from .config import _DEFAULT_APP_TYPE, _DEFAULT_APP_VERSION, Settings, get_settings
 from .logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -37,10 +37,9 @@ _EMETER_PRESENT = object()
 
 # The unified TP-Link cloud rejects stale clients with error -23003 ("App version
 # is too old"). The Kasa account is served by the same backend as Tapo, so we
-# present as a recent Tapo Android client. Overridable via env if TP-Link bumps
-# the minimum again.
-_DEFAULT_APP_TYPE = "Tapo_Android"
-_DEFAULT_APP_VERSION = "2.8.14"
+# present as a recent Tapo Android client. The defaults (and their env overrides
+# KASA_CLOUD_APP_TYPE/KASA_CLOUD_APP_VERSION) live in api.config; imported here so
+# the KasaCloudClient signature can default to them.
 _DEFAULT_BASE_URL = "https://wap.tplinkcloud.com"
 
 # Cloud-level error codes that mean the token is stale and we should re-login.
@@ -419,34 +418,33 @@ async def discover_cloud_devices(
     return devices
 
 
-def load_cloud_client() -> tuple[KasaCloudClient, tuple[str, ...]] | None:
-    """Build the cloud client + model filter from the environment, if enabled.
+def load_cloud_client(
+    settings: Settings | None = None,
+) -> tuple[KasaCloudClient, tuple[str, ...]] | None:
+    """Build the cloud client + model filter from settings, if enabled.
 
     Cloud control is opt-in via ``KASA_CLOUD_FALLBACK`` (it sends credentials to
     TP-Link's servers, unlike local control). Reuses the primary TP-Link
     credentials. ``KASA_CLOUD_MODELS`` (default ``HS300``) restricts which device
-    models are routed through the cloud.
+    models are routed through the cloud. ``settings`` defaults to the shared
+    instance; tests pass an isolated one.
     """
-    if os.getenv("KASA_CLOUD_FALLBACK", "").lower() not in ("1", "true", "yes", "on"):
+    settings = settings or get_settings()
+    if not settings.kasa_cloud_fallback:
         return None
-    username = os.getenv("TPLINK_USERNAME")
-    password = os.getenv("TPLINK_PASSWORD")
+    username = settings.tplink_username
+    password = settings.tplink_password
     if not (username and password):
         logger.warning(
             "KASA_CLOUD_FALLBACK is set but TPLINK_USERNAME/PASSWORD are not; "
             "cloud control disabled"
         )
         return None
-    models = tuple(
-        m.strip()
-        for m in os.getenv("KASA_CLOUD_MODELS", "HS300").split(",")
-        if m.strip()
-    )
     client = KasaCloudClient(
         username,
         password,
-        app_type=os.getenv("KASA_CLOUD_APP_TYPE", _DEFAULT_APP_TYPE),
-        app_version=os.getenv("KASA_CLOUD_APP_VERSION", _DEFAULT_APP_VERSION),
-        terminal_uuid=os.getenv("KASA_CLOUD_TERMINAL_UUID"),
+        app_type=settings.kasa_cloud_app_type,
+        app_version=settings.kasa_cloud_app_version,
+        terminal_uuid=settings.kasa_cloud_terminal_uuid,
     )
-    return client, models
+    return client, settings.cloud_models

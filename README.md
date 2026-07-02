@@ -96,9 +96,11 @@ All endpoints are under `/api`; interactive docs live at `http://localhost:8080/
 
 Newer Kasa devices use TP-Link's SMART protocol and authenticate before they
 can be discovered or controlled. Provide your TP-Link cloud credentials via a
-`.env` file (copy `.env.example` to `.env` and fill it in); Docker Compose reads
-it automatically. Without them, only legacy plugs are reachable. `.env` is
-gitignored — never commit real credentials.
+`.env` file (copy `.env.example` to `.env` and fill it in). The server loads
+`.env` from the repo root on every start — `just run`, `just api-dev`, and
+Docker Compose alike — with real environment variables taking precedence.
+Without credentials, only legacy plugs are reachable. `.env` is gitignored —
+never commit real credentials.
 
 ### Cloud fallback for devices that dropped local control
 

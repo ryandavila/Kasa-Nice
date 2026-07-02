@@ -14,11 +14,11 @@ request threadpool without sharing a connection across threads.
 """
 
 import asyncio
-import os
 import sqlite3
 import time
 from pathlib import Path
 
+from .config import Settings, get_settings
 from .logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -182,26 +182,19 @@ async def run_recorder(registry, store: EnergyHistoryStore, interval: float) -> 
         await asyncio.sleep(interval)
 
 
-def load_sample_interval() -> float:
-    """Seconds between recorder cycles (env ``KASA_ENERGY_SAMPLE_INTERVAL``).
+def load_sample_interval(settings: Settings | None = None) -> float:
+    """Seconds between recorder cycles (``KASA_ENERGY_SAMPLE_INTERVAL``).
 
     Defaults to 300s; floored at 10s so a misconfigured tiny value can't busy-loop.
-    Falls back to the default on a missing or invalid value.
+    Falls back to the default on a missing or invalid value. Parsing/clamping and
+    the warn-on-invalid live in ``api.config``; ``settings`` defaults to the
+    shared instance (tests pass an isolated one).
     """
-    raw = os.getenv("KASA_ENERGY_SAMPLE_INTERVAL")
-    if raw is None or not raw.strip():
-        return 300.0
-    try:
-        return max(10.0, float(raw))
-    except ValueError:
-        logger.warning(
-            f"Ignoring invalid KASA_ENERGY_SAMPLE_INTERVAL={raw!r}; using 300s"
-        )
-        return 300.0
+    settings = settings or get_settings()
+    return settings.kasa_energy_sample_interval
 
 
 # Module-level singleton, mirroring the registry/host-store pattern. The DB lives
 # at KASA_ENERGY_HISTORY_FILE (default ./data/energy_history.db); mount that path
 # as a volume to keep history across container rebuilds.
-_HISTORY_FILE = Path(os.getenv("KASA_ENERGY_HISTORY_FILE", "data/energy_history.db"))
-history = EnergyHistoryStore(_HISTORY_FILE)
+history = EnergyHistoryStore(get_settings().kasa_energy_history_file)

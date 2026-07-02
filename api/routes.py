@@ -3,6 +3,7 @@ import time
 from fastapi import APIRouter, HTTPException
 
 from .energy_history import history
+from .events import broadcaster
 from .group_store import groups
 from .kasa_service import (
     DeviceNotFoundError,
@@ -118,6 +119,8 @@ async def set_power(device_id: str, req: PowerRequest) -> Device:
         raise HTTPException(
             status_code=404, detail=f"Unknown device: {device_id}"
         ) from None
+    # Push the change to other clients now instead of on their next tick.
+    await broadcaster.publish_now()
     return serialize_device(device)
 
 
@@ -129,6 +132,7 @@ async def set_brightness(device_id: str, req: BrightnessRequest) -> Device:
         raise HTTPException(
             status_code=404, detail=f"Unknown or non-dimmable device: {device_id}"
         ) from None
+    await broadcaster.publish_now()
     return serialize_device(device)
 
 
@@ -146,6 +150,7 @@ async def set_color(device_id: str, req: ColorRequest) -> Device:
         raise HTTPException(
             status_code=404, detail=f"Unknown or non-color device: {device_id}"
         ) from None
+    await broadcaster.publish_now()
     return serialize_device(device)
 
 
@@ -157,6 +162,7 @@ async def set_child_power(device_id: str, child_id: str, req: PowerRequest) -> D
         raise HTTPException(
             status_code=404, detail=f"Unknown child: {device_id}/{child_id}"
         ) from None
+    await broadcaster.publish_now()
     return serialize_device(device)
 
 

@@ -236,14 +236,32 @@ class DeviceStore {
 	}
 
 	setBrightness(device: Device, value: number) {
+		const prevBrightness = device.brightness;
+		const prevOn = device.is_on;
 		device.brightness = value; // optimistic
 		device.is_on = true;
-		return this.run(device.id, () => setBrightness(device.id, value));
+		return this.run(
+			device.id,
+			() => setBrightness(device.id, value),
+			() => {
+				device.brightness = prevBrightness;
+				device.is_on = prevOn;
+			}
+		);
 	}
 
 	setColor(device: Device, hex: string) {
+		const prevHsv = device.hsv;
+		const prevOn = device.is_on;
 		device.is_on = true;
-		return this.run(device.id, () => setColorHex(device.id, hex));
+		return this.run(
+			device.id,
+			() => setColorHex(device.id, hex),
+			() => {
+				device.hsv = prevHsv;
+				device.is_on = prevOn;
+			}
+		);
 	}
 
 	toggleChild(device: Device, childId: string, on: boolean) {

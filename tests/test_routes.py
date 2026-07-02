@@ -124,6 +124,27 @@ def test_toggle_power(client):
     assert r.json()["is_on"] is True
 
 
+def test_control_action_nudges_broadcaster(client, monkeypatch):
+    # A successful control action should push a fresh frame to other clients
+    # immediately instead of leaving them to wait for the next refresh tick.
+    nudge = AsyncMock()
+    monkeypatch.setattr(routes.broadcaster, "publish_now", nudge)
+    assert (
+        client.post("/api/devices/10.0.0.1/power", json={"on": True}).status_code == 200
+    )
+    nudge.assert_awaited_once()
+
+
+def test_failed_control_action_does_not_nudge(client, monkeypatch):
+    # An unknown device 404s before any state changes, so there's nothing to push.
+    nudge = AsyncMock()
+    monkeypatch.setattr(routes.broadcaster, "publish_now", nudge)
+    assert (
+        client.post("/api/devices/9.9.9.9/power", json={"on": True}).status_code == 404
+    )
+    nudge.assert_not_awaited()
+
+
 def test_power_unknown_device_404(client):
     r = client.post("/api/devices/9.9.9.9/power", json={"on": True})
     assert r.status_code == 404

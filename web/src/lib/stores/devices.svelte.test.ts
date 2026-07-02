@@ -35,6 +35,9 @@ import * as client from '$lib/api/client';
 import { deviceStore } from './devices.svelte';
 
 const setChildPower = client.setChildPower as Mock;
+const setBrightness = client.setBrightness as Mock;
+const setColorHex = client.setColorHex as Mock;
+const setPower = client.setPower as Mock;
 
 function strip(): Device {
 	return {
@@ -50,6 +53,24 @@ function strip(): Device {
 		brightness: null,
 		hsv: null,
 		children: [{ id: 'STRIP_00', alias: 'Soldering Iron', is_on: false }]
+	};
+}
+
+function makeDevice(over: Partial<Device> = {}): Device {
+	return {
+		id: '10.0.0.1',
+		alias: 'Lamp',
+		host: '10.0.0.1',
+		model: 'KL130',
+		device_type: 'Bulb',
+		is_on: false,
+		is_color: true,
+		is_dimmable: true,
+		has_emeter: false,
+		brightness: 40,
+		hsv: [120, 100, 100],
+		children: [],
+		...over
 	};
 }
 
@@ -80,5 +101,66 @@ describe('toggleChild', () => {
 		await deviceStore.toggleChild(device, 'STRIP_00', true);
 
 		expect(device.children[0].is_on).toBe(false); // reverted
+	});
+});
+
+describe('setBrightness optimistic revert', () => {
+	it('applies the new value optimistically then persists', async () => {
+		const d = makeDevice({ brightness: 40, is_on: false });
+		deviceStore.devices = [d];
+		setBrightness.mockResolvedValue(makeDevice({ brightness: 80, is_on: true }));
+		await deviceStore.setBrightness(d, 80);
+		expect(setBrightness).toHaveBeenCalledWith('10.0.0.1', 80);
+		expect(deviceStore.devices[0].brightness).toBe(80);
+		expect(deviceStore.devices[0].is_on).toBe(true);
+	});
+
+	it('reverts brightness and power when the request fails', async () => {
+		const d = makeDevice({ brightness: 40, is_on: false });
+		deviceStore.devices = [d];
+		setBrightness.mockRejectedValue(new Error('offline'));
+		await deviceStore.setBrightness(d, 80);
+		expect(d.brightness).toBe(40);
+		expect(d.is_on).toBe(false);
+	});
+});
+
+describe('setColor optimistic revert', () => {
+	it('reverts hsv and power when the request fails', async () => {
+		const d = makeDevice({ hsv: [200, 50, 50], is_on: false });
+		deviceStore.devices = [d];
+		setColorHex.mockRejectedValue(new Error('offline'));
+		await deviceStore.setColor(d, '#ff0000');
+		expect(d.hsv).toEqual([200, 50, 50]);
+		expect(d.is_on).toBe(false);
+	});
+});
+
+describe('merge with sparse SSE frames', () => {
+	it('is idempotent: applying the same frame twice leaves state unchanged', () => {
+		const d = makeDevice({ is_on: true, brightness: 60 });
+		deviceStore.devices = [d];
+		const frame = [makeDevice({ is_on: true, brightness: 60 })];
+		// @ts-expect-error - exercise the private merge directly
+		deviceStore.merge(frame);
+		// @ts-expect-error - exercise the private merge directly
+		deviceStore.merge(frame);
+		expect(deviceStore.devices[0].is_on).toBe(true);
+		expect(deviceStore.devices[0].brightness).toBe(60);
+	});
+
+	it('skips devices with an in-flight request so a frame never clobbers optimism', async () => {
+		const d = makeDevice({ is_on: false });
+		deviceStore.devices = [d];
+		// Hold the request open so the device is "busy" while a frame arrives.
+		let resolve!: (v: Device) => void;
+		setPower.mockReturnValue(new Promise<Device>((r) => (resolve = r)));
+		const pending = deviceStore.togglePower(d, true);
+		// A stale frame reports the device still off; merge must ignore it.
+		// @ts-expect-error - exercise the private merge directly
+		deviceStore.merge([makeDevice({ is_on: false })]);
+		expect(d.is_on).toBe(true); // optimistic value survives
+		resolve(makeDevice({ is_on: true }));
+		await pending;
 	});
 });

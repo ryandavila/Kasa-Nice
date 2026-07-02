@@ -1,0 +1,48 @@
+{
+	"name": "Kasa Nice",
+	"short_name": "Kasa",
+	"description": "Control your TP-Link Kasa smart home devices on your local network.",
+	"display": "standalone",
+	"start_url": "/",
+	"scope": "/",
+	"background_color": "#e9edec",
+	"theme_color": "#4acbd6",
+	"icons": [
+		{
+			"src": "/icon.svg",
+			"type": "image/svg+xml",
+			"sizes": "any",
+			"purpose": "any"
+		},
+		{
+			"src": "/icon-maskable.svg",
+			"type": "image/svg+xml",
+			"sizes": "any",
+			"purpose": "maskable"
+		},
+		{
+			"src": "/icon-192.png",
+			"type": "image/png",
+			"sizes": "192x192",
+			"purpose": "any"
+		},
+		{
+			"src": "/icon-512.png",
+			"type": "image/png",
+			"sizes": "512x512",
+			"purpose": "any"
+		},
+		{
+			"src": "/icon-maskable-192.png",
+			"type": "image/png",
+			"sizes": "192x192",
+			"purpose": "maskable"
+		},
+		{
+			"src": "/icon-maskable-512.png",
+			"type": "image/png",
+			"sizes": "512x512",
+			"purpose": "maskable"
+		}
+	]
+}

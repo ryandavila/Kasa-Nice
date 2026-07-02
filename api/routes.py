@@ -23,6 +23,7 @@ from .schemas import (
     DiscoverRequest,
     EnergyHistory,
     EnergySample,
+    EnergySummary,
     Favorites,
     Group,
     GroupCreate,
@@ -131,6 +132,35 @@ async def usage(device_id: str) -> Usage:
         raise HTTPException(
             status_code=404, detail=f"Device has no energy monitoring: {device_id}"
         ) from None
+
+
+@router.get("/energy/summary", response_model=EnergySummary)
+async def energy_summary() -> EnergySummary:
+    """Whole-home energy totals aggregated across every metered device.
+
+    Per-device usage is read concurrently; a device that errors (offline, or with
+    no energy monitoring) is skipped rather than failing the whole summary. Live
+    ``get_usage`` is the source — it already supplies live power plus today/month
+    totals for both local and cloud meters, so the history DB isn't needed here.
+    Null per-device readings count as zero; costs use the flat rate and stay null
+    when it's unset. With no metered devices the totals are zero (not a 404).
+    """
+    results = await asyncio.gather(
+        *(registry.get_usage(stable_device_id(d)) for d in registry.all()),
+        return_exceptions=True,
+    )
+    usages = [u for u in results if isinstance(u, Usage)]
+
+    today_kwh = sum(u.today_kwh or 0.0 for u in usages)
+    month_kwh = sum(u.month_kwh or 0.0 for u in usages)
+    return EnergySummary(
+        total_power_w=round(sum(u.current_power_w or 0.0 for u in usages), 1),
+        today_kwh=round(today_kwh, 3),
+        month_kwh=round(month_kwh, 3),
+        today_cost=_cost(today_kwh, registry.energy_rate),
+        month_cost=_cost(month_kwh, registry.energy_rate),
+        device_count=len(usages),
+    )
 
 
 @router.post("/devices/{device_id}/power", response_model=Device)

@@ -77,6 +77,20 @@ export interface Usage {
 	monthly: UsageStat[];
 }
 
+/** Whole-home energy totals aggregated across all metered devices. */
+export interface EnergySummary {
+	/** Sum of live power draw across all metered devices, in watts. */
+	total_power_w: number;
+	today_kwh: number;
+	month_kwh: number;
+	/** Flat-rate cost for today's energy; null when no rate is configured. */
+	today_cost: number | null;
+	/** Flat-rate cost for the month's energy; null when no rate is configured. */
+	month_cost: number | null;
+	/** Number of metered devices included in the totals. */
+	device_count: number;
+}
+
 /** A user-defined room: a named, ordered set of device ids. */
 export interface Group {
 	id: string;

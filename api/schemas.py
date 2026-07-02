@@ -64,6 +64,30 @@ class Usage(BaseModel):
     )
 
 
+class EnergySummary(BaseModel):
+    """Whole-home energy totals aggregated across every metered device.
+
+    Each field sums the corresponding per-device reading; a device's null
+    reading counts as zero. Cost fields use the flat rate and stay null when no
+    rate is configured. With no metered devices the totals are simply zero.
+    """
+
+    total_power_w: float = Field(
+        description="Sum of live power draw across all metered devices, in watts."
+    )
+    today_kwh: float
+    month_kwh: float
+    today_cost: float | None = Field(
+        default=None, description="today_kwh × flat rate, or null when no rate is set."
+    )
+    month_cost: float | None = Field(
+        default=None, description="month_kwh × flat rate, or null when no rate is set."
+    )
+    device_count: int = Field(
+        description="Number of metered devices included in the totals."
+    )
+
+
 class DiscoverRequest(BaseModel):
     target: str | None = Field(
         default=None,

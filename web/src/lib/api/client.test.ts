@@ -8,7 +8,8 @@ import {
 	deleteGroup,
 	setFavorites,
 	setGroupPower,
-	setAllPower
+	setAllPower,
+	getEnergySummary
 } from './client';
 
 function mockFetch(impl: (url: string, init?: RequestInit) => unknown) {
@@ -120,6 +121,21 @@ describe('endpoint shapes', () => {
 		const [url, init] = fetchFn.mock.calls[0];
 		expect(url).toBe('/api/groups/room%201/power');
 		expect(init).toMatchObject({ method: 'POST', body: JSON.stringify({ on: false }) });
+	});
+
+	it('getEnergySummary GETs the whole-home summary path', async () => {
+		const body = {
+			total_power_w: 25,
+			today_kwh: 0.6,
+			month_kwh: 8.4,
+			today_cost: null,
+			month_cost: null,
+			device_count: 2
+		};
+		const fetchFn = mockFetch(() => ok(body));
+		const result = await getEnergySummary();
+		expect(fetchFn.mock.calls[0][0]).toBe('/api/energy/summary');
+		expect(result).toEqual(body);
 	});
 
 	it('setAllPower POSTs the on flag to the global power path', async () => {

@@ -203,6 +203,82 @@ def test_usage_without_emeter_404(client):
     assert client.get("/api/devices/10.0.0.1/usage").status_code == 404
 
 
+# ── Whole-home energy summary ─────────────────────────────────────────────────
+
+
+def _summary_app(reg, monkeypatch):
+    monkeypatch.setattr(routes, "registry", reg)
+    app = FastAPI()
+    app.include_router(routes.router)
+    return TestClient(app)
+
+
+def test_energy_summary_sums_metered_devices(monkeypatch):
+    # Two metered devices; non-metered devices are excluded from every total.
+    reg = DeviceRegistry()
+    reg._devices = {
+        "10.0.0.1": FakeDevice("10.0.0.1", alias="Plug"),  # no emeter
+        "10.0.0.4": FakeDevice("10.0.0.4", alias="Meter", has_energy=True),
+        "10.0.0.5": FakeDevice("10.0.0.5", alias="Meter2", has_energy=True),
+    }
+    body = _summary_app(reg, monkeypatch).get("/api/energy/summary").json()
+    # FakeEnergy: 12.5 W, 0.3 kWh today, 4.2 kWh month — summed over two meters.
+    assert body["device_count"] == 2
+    assert body["total_power_w"] == 25.0
+    assert body["today_kwh"] == 0.6
+    assert body["month_kwh"] == 8.4
+
+
+def test_energy_summary_skips_erroring_device(monkeypatch):
+    # One meter errors on read; the other still counts and no 500 is raised.
+    reg = DeviceRegistry()
+    reg._devices = {
+        "10.0.0.4": FakeDevice("10.0.0.4", alias="Meter", has_energy=True),
+        "10.0.0.5": FakeDevice("10.0.0.5", alias="Broken", has_energy=True),
+    }
+    real_get_usage = reg.get_usage
+
+    async def flaky(device_id):
+        if device_id == "10.0.0.5":
+            raise RuntimeError("device offline")
+        return await real_get_usage(device_id)
+
+    monkeypatch.setattr(reg, "get_usage", flaky)
+    r = _summary_app(reg, monkeypatch).get("/api/energy/summary")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["device_count"] == 1
+    assert body["today_kwh"] == 0.3
+
+
+def test_energy_summary_costs_null_without_rate(monkeypatch):
+    reg = DeviceRegistry()
+    reg._devices = {"10.0.0.4": FakeDevice("10.0.0.4", has_energy=True)}
+    body = _summary_app(reg, monkeypatch).get("/api/energy/summary").json()
+    assert body["today_cost"] is None
+    assert body["month_cost"] is None
+
+
+def test_energy_summary_costs_populated_with_rate(monkeypatch):
+    reg = DeviceRegistry(energy_rate=0.25)
+    reg._devices = {"10.0.0.4": FakeDevice("10.0.0.4", has_energy=True)}
+    body = _summary_app(reg, monkeypatch).get("/api/energy/summary").json()
+    assert body["today_cost"] == round(0.3 * 0.25, 2)
+    assert body["month_cost"] == round(4.2 * 0.25, 2)
+
+
+def test_energy_summary_empty_registry_is_zeros(monkeypatch):
+    body = _summary_app(DeviceRegistry(), monkeypatch).get("/api/energy/summary").json()
+    assert body == {
+        "total_power_w": 0.0,
+        "today_kwh": 0.0,
+        "month_kwh": 0.0,
+        "today_cost": None,
+        "month_cost": None,
+        "device_count": 0,
+    }
+
+
 # ── Room & global power fan-out ───────────────────────────────────────────────
 
 

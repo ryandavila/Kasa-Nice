@@ -1,6 +1,7 @@
 import type {
 	Device,
 	EnergyHistory,
+	EnergySummary,
 	Favorites,
 	Group,
 	Hsv,
@@ -94,6 +95,9 @@ export const setColorHsv = (id: string, hsv: Hsv) =>
 
 /** Energy-monitoring data (live power + daily/monthly history) for a device. */
 export const getUsage = (id: string) => request<Usage>(`/devices/${encodeURIComponent(id)}/usage`);
+
+/** Whole-home energy totals aggregated across all metered devices. */
+export const getEnergySummary = () => request<EnergySummary>('/energy/summary');
 
 export const setChildPower = (id: string, childId: string, on: boolean) =>
 	post<Device>(`/devices/${encodeURIComponent(id)}/children/${encodeURIComponent(childId)}/power`, {

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import type { EnergyHistory, Usage, UsageStat } from '$lib/api/types';
-	import { getUsage, getHistory, getConfig, ApiError } from '$lib/api/client';
+	import type { EnergyHistory, EnergySummary, Usage, UsageStat } from '$lib/api/types';
+	import { getUsage, getHistory, getConfig, getEnergySummary, ApiError } from '$lib/api/client';
 	import { deviceStore } from '$lib/stores/devices.svelte';
 	import Icon from './Icon.svelte';
 	import EnergyChart from './EnergyChart.svelte';
@@ -13,6 +13,8 @@
 	let history = $state<Record<string, EnergyHistory>>({});
 	let errors = $state<Record<string, string>>({});
 	let loading = $state<Record<string, boolean>>({});
+	// Whole-home totals across every metered device; null until first loaded.
+	let summary = $state<EnergySummary | null>(null);
 
 	// Persisted daily totals as chart bars; label the ISO date as a short M/D.
 	function dailyBars(h: EnergyHistory | undefined): UsageStat[] {
@@ -47,7 +49,16 @@
 		}
 	}
 
+	async function loadSummary() {
+		try {
+			summary = await getEnergySummary();
+		} catch {
+			// summary is best-effort; the per-device cards below still render
+		}
+	}
+
 	function loadAll() {
+		loadSummary();
 		for (const m of meters) loadOne(m.id);
 	}
 
@@ -92,6 +103,38 @@
 				<span class="font-mono text-accent-ink">{currency}{energyRate}/kWh</span>
 				— flat rate, excludes tiered/time-of-use pricing, fees, and taxes.
 			</p>
+		{/if}
+		{#if summary}
+			<section class="rounded-card border border-line bg-surface/70 p-5 sm:p-6">
+				<div class="flex items-center gap-3">
+					<span
+						class="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-accent-soft text-accent-ink"
+					>
+						<Icon name="chart" size={22} />
+					</span>
+					<div class="min-w-0">
+						<h3 class="truncate font-display text-lg font-semibold text-ink">Whole home</h3>
+						<p class="truncate text-[11px] text-faint">
+							{summary.device_count} metered {summary.device_count === 1 ? 'device' : 'devices'}
+						</p>
+					</div>
+				</div>
+				<dl class="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
+					{#each [{ k: 'Now', v: fmt(summary.total_power_w, 1), unit: 'W', cost: null }, { k: 'Today', v: fmt(summary.today_kwh), unit: 'kWh', cost: summary.today_cost }, { k: 'This month', v: fmt(summary.month_kwh), unit: 'kWh', cost: summary.month_cost }] as s (s.k)}
+						<div class="rounded-xl border border-line bg-raised/50 px-3 py-2.5">
+							<dt class="text-[11px] uppercase tracking-wide text-faint">{s.k}</dt>
+							<dd class="mt-0.5 font-display text-xl font-semibold text-ink">
+								{s.v}<span class="ml-1 text-xs font-normal text-muted">{s.unit}</span>
+							</dd>
+							{#if energyRate != null && s.cost != null}
+								<dd class="mt-1 font-display text-base font-semibold text-accent-ink">
+									≈{fmtMoney(s.cost)}
+								</dd>
+							{/if}
+						</div>
+					{/each}
+				</dl>
+			</section>
 		{/if}
 		{#each meters as device (device.id)}
 			{@const u = usage[device.id]}

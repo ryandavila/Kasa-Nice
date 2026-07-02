@@ -21,7 +21,7 @@ web-install:
 # Complete development setup (Python + frontend)
 setup: dev-install web-install
     @echo "Development environment ready!"
-    @echo "Run 'just api-dev' and 'just web-dev' in two terminals to start developing."
+    @echo "Run 'just dev' to start developing (API autoreload + frontend HMR)."
 
 # --- Run ---
 
@@ -32,6 +32,19 @@ run: web-build
 # Run the API with autoreload (frontend served separately via web-dev)
 api-dev:
     uv run uvicorn api.main:app --reload --host 127.0.0.1 --port 8080
+
+# Run the API (autoreload) and the Vite dev server (HMR) together; Ctrl-C stops
+# both. Pass a port when 8080 is taken (e.g. by the Docker instance): `just dev 8090`.
+dev port="8080":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # Backend starts from the repo root so the CWD-relative .env is picked up.
+    uv run uvicorn api.main:app --reload --host 127.0.0.1 --port {{port}} &
+    api_pid=$!
+    # Kill the API on any exit (Ctrl-C, Vite dying) so it never leaks.
+    trap 'kill "$api_pid" 2>/dev/null || true; wait "$api_pid" 2>/dev/null || true' EXIT
+    # Vite owns the foreground; its proxy targets whichever port the API got.
+    cd web && API_PROXY_TARGET="http://127.0.0.1:{{port}}" bun run dev
 
 # Run the SvelteKit dev server (proxies /api to the backend)
 web-dev:

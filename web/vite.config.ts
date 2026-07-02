@@ -20,9 +20,10 @@ export default defineConfig({
 	server: {
 		// In dev, forward API calls to the FastAPI backend so frontend code can
 		// always fetch relative '/api/...' paths in both dev and production.
+		// `just dev <port>` overrides the target so dev can dodge a busy 8080.
 		proxy: {
 			'/api': {
-				target: 'http://localhost:8080',
+				target: process.env.API_PROXY_TARGET ?? 'http://localhost:8080',
 				changeOrigin: true
 			}
 		}

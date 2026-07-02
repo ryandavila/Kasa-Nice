@@ -202,6 +202,14 @@ fetches relative paths in both dev and production.
 ```bash
 just setup     # one-time: install Python + frontend deps
 
+just dev       # API autoreload + frontend HMR in one terminal (http://localhost:5173)
+just dev 8090  # same, with the API on another port when 8080 is taken
+```
+
+Prefer separate terminals (e.g. to restart one side independently)? The two
+halves are still available on their own:
+
+```bash
 just api-dev   # Terminal 1 — FastAPI with autoreload (http://localhost:8080)
 just web-dev   # Terminal 2 — SvelteKit dev server (http://localhost:5173)
 ```

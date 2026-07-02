@@ -1,18 +1,14 @@
 """Control of Kasa devices that only answer through the TP-Link cloud.
 
-The HS300 power strips' firmware (from ~Oct 2025) replaced the local KLAP
-credential handshake with a token/certificate scheme that python-kasa cannot yet
-authenticate (upstream issue #1604), and disabled the legacy local port 9999.
-The devices remain fully controllable through TP-Link's cloud — the same path the
-Kasa mobile app uses — via the long-standing ``passthrough`` RPC, which tunnels
-the original local JSON command (``get_sysinfo``, ``set_relay_state``) to the
-device.
+HS300 strip firmware (~Oct 2025) dropped the local KLAP handshake for a
+token/certificate scheme python-kasa can't authenticate (upstream #1604) and
+disabled local port 9999. They stay controllable via TP-Link's cloud
+``passthrough`` RPC, which tunnels the original local JSON command
+(``get_sysinfo``, ``set_relay_state``) to the device.
 
-To avoid touching the rest of the app, the cloud devices here duck-type the small
-slice of the python-kasa ``Device``/child interface that ``serialize_device`` and
-``DeviceRegistry`` actually use: ``host``/``alias``/``model``/``device_type.name``/
-``is_on``/``children`` plus ``update()`` and ``turn_on()``/``turn_off()``. They
-slot straight into the existing registry, routes, and serializer.
+The cloud devices duck-type the slice of the python-kasa ``Device``/child
+interface that ``serialize_device`` and ``DeviceRegistry`` use, so they slot into
+the existing registry, routes, and serializer unchanged.
 """
 
 import asyncio
@@ -30,16 +26,13 @@ from .logging_config import get_logger
 
 logger = get_logger(__name__)
 
-# Marker stored under modules[Module.Energy] so serialize_device reports the strip
-# as having an energy meter. The real readings flow through energy_summary()
-# rather than the python-kasa module interface, so this only needs to be non-None.
+# Marker under modules[Module.Energy] so serialize_device reports an energy meter.
+# Real readings flow through energy_summary(), so this only needs to be non-None.
 _EMETER_PRESENT = object()
 
-# The unified TP-Link cloud rejects stale clients with error -23003 ("App version
-# is too old"). The Kasa account is served by the same backend as Tapo, so we
-# present as a recent Tapo Android client. The defaults (and their env overrides
-# KASA_CLOUD_APP_TYPE/KASA_CLOUD_APP_VERSION) live in api.config; imported here so
-# the KasaCloudClient signature can default to them.
+# The cloud rejects stale clients with -23003 ("App version is too old"); the app
+# type/version defaults (env-overridable) live in api.config and present as a
+# recent Tapo Android client, since the Kasa account shares Tapo's backend.
 _DEFAULT_BASE_URL = "https://wap.tplinkcloud.com"
 
 # Cloud-level error codes that mean the token is stale and we should re-login.
@@ -114,9 +107,9 @@ class KasaCloudClient:
             logger.info("Authenticated with TP-Link cloud")
 
     async def _call(self, url_base: str, body: dict[str, Any]) -> dict[str, Any]:
-        """POST a token-authenticated RPC, re-logging in once if the token expired.
+        """POST a token-authed RPC, re-logging in once on token expiry.
 
-        Returns the ``result`` object. Raises ``CloudError`` on a hard failure.
+        Returns the ``result`` object; raises ``CloudError`` on a hard failure.
         """
         if self._token is None:
             await self._login()
@@ -170,8 +163,8 @@ def _format_mac(mac: str) -> str:
 def _entry_kwh(entry: dict[str, Any]) -> float:
     """Energy of one daystat/monthstat entry in kWh.
 
-    Newer HS300 firmware reports integer watt-hours (``energy_wh``); older
-    firmware reports kWh as a float (``energy``).
+    Newer firmware reports integer watt-hours (``energy_wh``); older reports kWh
+    as a float (``energy``).
     """
     if "energy_wh" in entry:
         return entry["energy_wh"] / 1000
@@ -213,21 +206,16 @@ class CloudDevice:
         self.mac = _norm_mac(mac)
         self.alias = alias
         self.model = model
-        # The public id is the normalized MAC (see ``stable_device_id``), shared
-        # with locally-discovered devices so a device that migrates between local
-        # and cloud control keeps one identity. host is connection/display only:
-        # we prefer the device's LAN IP when the registry can resolve it from the
-        # MAC, and fall back to the formatted MAC so something sensible shows
-        # when it can't.
+        # host is connection/display only: prefer the LAN IP the registry resolves
+        # from the MAC, falling back to the formatted MAC. The stable id is the
+        # normalized MAC (see ``stable_device_id``).
         self.host = _format_mac(mac)
         self.is_on = False
         self.children: list[CloudChild] = []
-        # Once-guard so we warn about a drifted device clock at most once per
-        # device, not on every usage poll.
+        # Once-guard: warn about a drifted device clock at most once per device.
         self._clock_drift_warned: bool = False
-        # A strip is neither color nor dimmable, so the empty sys_info makes
-        # serialize_device report both as false. It does meter energy per outlet,
-        # so advertise an Energy module (read via energy_summary()).
+        # Empty sys_info => serialize_device reports not color/dimmable. Advertise
+        # an Energy module since it meters per outlet (read via energy_summary()).
         self.sys_info: dict[str, Any] = {}
         self.modules: dict[Any, Any] = {Module.Energy: _EMETER_PRESENT}
         self.device_type = SimpleNamespace(name="Strip")
@@ -254,7 +242,7 @@ class CloudDevice:
             else:
                 children.append(CloudChild(self, cid, alias, on))
         self.children = children
-        # A strip is "on" if any outlet is on, matching python-kasa's semantics.
+        # "on" if any outlet is on, matching python-kasa's semantics.
         self.is_on = any(c.is_on for c in self.children)
 
     async def _set_children_relay(self, child_ids: list[str], on: bool) -> None:
@@ -287,25 +275,22 @@ class CloudDevice:
     async def energy_summary(self) -> dict[str, Any]:
         """Aggregate every outlet's energy meter into one whole-strip summary.
 
-        HS300 metering is per-outlet (a parent-level read returns only slot 0), so
-        we read realtime power, this month's days, and this year's months for each
-        outlet — concurrently — and sum them. Returns the keyword arguments the
-        registry's ``Usage`` builder expects. On-demand only (driven by the usage
-        endpoint), so it never runs on the state poll.
+        Metering is per-outlet (a parent read returns only slot 0), so read
+        realtime power, this month's days, and this year's months per outlet
+        concurrently and sum them. Returns the kwargs the registry's ``Usage``
+        builder expects. On-demand only, so it never runs on the state poll.
         """
-        # The device buckets energy history by its OWN clock, which can drift from
-        # the server's, so derive "today"/"this month" from the device itself —
-        # otherwise today_kwh/month_kwh query an empty bucket. Fall back to the
-        # server date if the clock read fails.
+        # The device buckets history by its OWN clock, which can drift, so derive
+        # "today"/"this month" from the device — else today_kwh/month_kwh query an
+        # empty bucket. Fall back to the server date if the clock read fails.
         try:
             clock = (await self._passthrough({"time": {"get_time": None}}))["time"][
                 "get_time"
             ]
             year, month, today = clock["year"], clock["month"], clock["mday"]
-            # The strip's internal clock can drift far behind real time, which
-            # silently misattributes energy to the wrong day/month bucket. Warn
+            # A drifted clock misattributes energy to the wrong day/month; warn
             # once if it's off by more than a day. Guarded so a malformed clock
-            # can never break the normal return path.
+            # can't break the normal return path.
             if not self._clock_drift_warned:
                 try:
                     device_dt = datetime(
@@ -380,10 +365,10 @@ async def discover_cloud_devices(
     models: tuple[str, ...],
     skip_macs: frozenset[str] = frozenset(),
 ) -> list[CloudDevice]:
-    """Build cloud-controlled devices for online account devices matching ``models``.
+    """Build cloud devices for online account devices matching ``models``.
 
-    ``skip_macs`` (normalized) lets the caller exclude devices it already controls
-    locally, so a device reachable both ways isn't listed twice.
+    ``skip_macs`` (normalized) excludes devices already controlled locally, so a
+    device reachable both ways isn't listed twice.
     """
     devices: list[CloudDevice] = []
     for entry in await client.get_device_list():
@@ -423,11 +408,10 @@ def load_cloud_client(
 ) -> tuple[KasaCloudClient, tuple[str, ...]] | None:
     """Build the cloud client + model filter from settings, if enabled.
 
-    Cloud control is opt-in via ``KASA_CLOUD_FALLBACK`` (it sends credentials to
-    TP-Link's servers, unlike local control). Reuses the primary TP-Link
-    credentials. ``KASA_CLOUD_MODELS`` (default ``HS300``) restricts which device
-    models are routed through the cloud. ``settings`` defaults to the shared
-    instance; tests pass an isolated one.
+    Opt-in via ``KASA_CLOUD_FALLBACK`` (it sends credentials to TP-Link's
+    servers, unlike local control), reusing the primary TP-Link credentials.
+    ``KASA_CLOUD_MODELS`` (default ``HS300``) restricts which models route through
+    the cloud. ``settings`` defaults to the shared instance (tests pass their own).
     """
     settings = settings or get_settings()
     if not settings.kasa_cloud_fallback:

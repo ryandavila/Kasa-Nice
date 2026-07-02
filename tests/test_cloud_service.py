@@ -1,11 +1,8 @@
 """Tests for the TP-Link cloud control path (``api.cloud_service``).
 
-The HTTP boundary is the only thing mocked: ``KasaCloudClient._raw_post`` (the
-single method that actually talks to the network) is patched with an
-``AsyncMock``, and ``CloudDevice`` is driven through a fake client whose
-``passthrough``/``get_device_list`` are ``AsyncMock``s. No real devices or
-network are involved, matching the rest of the suite. Tests use ``asyncio.run``
-rather than a plugin, consistent with ``test_kasa_service.py``.
+Only the HTTP boundary is mocked: ``KasaCloudClient._raw_post`` (the sole method
+that talks to the network) via ``AsyncMock``, and ``CloudDevice`` through a fake
+client. Uses ``asyncio.run`` like ``test_kasa_service.py``.
 """
 
 import asyncio
@@ -455,9 +452,8 @@ def test_discover_skips_device_whose_initial_read_fails():
 
 # ── load_cloud_client (config-driven) ────────────────────────────────────────
 #
-# These build an isolated Settings (``_env_file=None``, no dotenv) and pass it
-# straight in, so no environment mutation leaks between tests and a developer's
-# real .env can't influence them.
+# Build an isolated Settings (``_env_file=None``, no dotenv) and pass it in, so
+# no env mutation leaks and a developer's real .env can't influence them.
 
 
 def _settings(**overrides) -> Settings:

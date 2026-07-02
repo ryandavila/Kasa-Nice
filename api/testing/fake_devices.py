@@ -1,15 +1,9 @@
-"""In-process stand-ins for ``python-kasa`` devices, with no hardware or network.
+"""In-process stand-ins for ``python-kasa`` devices, no hardware or network.
 
-These fakes mimic just the surface of ``python-kasa`` that the service and
-serializer touch. They serve two callers:
-
-* the pytest suite (``tests/conftest.py`` re-exports them), and
-* the ``KASA_FAKE_DEVICES`` runtime seam, which seeds the live registry with a
-  few of them so the browser end-to-end smoke test can drive real API wiring
-  without any Kasa hardware or cloud credentials.
-
-Kept outside ``tests/`` so both callers share one definition instead of
-duplicating it.
+Mimic just the surface the service and serializer touch. Two callers: the pytest
+suite (``tests/conftest.py`` re-exports them) and the ``KASA_FAKE_DEVICES`` seam
+that seeds the live registry for the browser e2e test. Kept outside ``tests/`` so
+both share one definition.
 """
 
 from __future__ import annotations
@@ -43,8 +37,8 @@ class FakeEnergy:
     voltage = 120.0
 
     def __init__(self) -> None:
-        # Count stats-table fetches so tests can assert the recorder's light
-        # snapshot read never triggers them — only the /usage path should.
+        # Count stats-table fetches so tests can assert the recorder's snapshot
+        # read never triggers them — only /usage should.
         self.daily_stats_calls = 0
         self.monthly_stats_calls = 0
 
@@ -68,13 +62,12 @@ class FakeChild:
     ):
         self.alias = alias
         self.is_on = is_on
-        # python-kasa child devices carry a stable ``device_id`` (parent id + slot).
-        # Optional so tests can also cover the alias fallback when it's absent.
+        # python-kasa children carry a stable ``device_id`` (parent id + slot);
+        # optional so tests can cover the alias fallback.
         if device_id is not None:
             self.device_id = device_id
-        # Real python-kasa children expose set_alias; the cloud façade's CloudChild
-        # doesn't. Assigning it only when renamable lets tests exercise both the
-        # rename path and the cloud-style rejection (hasattr is False otherwise).
+        # Real children expose set_alias; CloudChild doesn't. Assign it only when
+        # renamable so tests exercise both the rename and cloud-rejection paths.
         if renamable:
             self.set_alias = self._apply_alias
 
@@ -115,14 +108,11 @@ class FakeDevice:
     ):
         self.host = host
         self._fail_update = fail_update
-        # When set, every state read (``update``) flips ``is_on``. Used by the
-        # KASA_FAKE_DEVICES seam to manufacture a server-side change the browser
-        # never initiated: the SSE stream re-reads devices on its own interval,
-        # so this device's card toggles live — the exact thing the smoke test
-        # asserts arrives over SSE without a page reload.
+        # When set, every ``update`` flips ``is_on``. The KASA_FAKE_DEVICES seam
+        # uses this to manufacture a server-side change the SSE stream surfaces
+        # without a page reload (the smoke test's live-update case).
         self._toggles_on_update = toggles_on_update
-        # Optional so most tests keep host-as-id (the MAC-absent fallback); tests
-        # exercising stable ids pass a MAC to get MAC-based keying.
+        # Optional so most tests keep host-as-id; pass a MAC for MAC-based keying.
         if mac is not None:
             self.mac = mac
         self.alias = alias
@@ -137,9 +127,8 @@ class FakeDevice:
         if has_energy:
             self.modules[Module.Energy] = FakeEnergy()
         self.update_count = 0
-        # Mirror python-kasa: real devices expose set_alias, the cloud façade does
-        # not. ``renamable=False`` models a cloud-only device so tests can cover
-        # the can_rename=False serialization and the rename-rejection path.
+        # Real devices expose set_alias, the cloud façade doesn't;
+        # ``renamable=False`` models a cloud-only device for the rejection tests.
         if renamable:
             self.set_alias = self._apply_alias
 
@@ -166,7 +155,7 @@ class FakeDiscover:
     def __init__(self):
         self.broadcast: dict[str, FakeDevice] = {}
         self.targets: dict[str, dict[str, FakeDevice]] = {}
-        self.credentials = None  # records the last value passed in
+        self.credentials = None  # last value passed in
 
     async def discover(
         self, target: str | None = None, credentials=None
@@ -187,9 +176,8 @@ class FakeDiscover:
 def _sample_devices() -> list[FakeDevice]:
     """A small, varied device set for the ``KASA_FAKE_DEVICES`` seam.
 
-    Covers the shapes the smoke test needs: a plain plug to toggle by hand, a
-    dimmable colour bulb for card variety, and a plug that flips its own state on
-    every read to drive the SSE live-update assertion.
+    A plain plug to toggle by hand, a colour bulb for variety, and a plug that
+    flips its own state on every read to drive the SSE live-update assertion.
     """
     return [
         FakeDevice("10.0.0.11", alias="Living Room Lamp", model="HS100"),
@@ -214,11 +202,9 @@ def _sample_devices() -> list[FakeDevice]:
 def seed_registry(registry: DeviceRegistry) -> None:
     """Populate ``registry`` with the sample fakes instead of real discovery.
 
-    Keys entries by ``stable_device_id`` (the MAC-less fakes fall back to their
-    host), matching how discovery would register them. This seam lives inside
-    the package and deliberately bypasses the network discovery path that
-    ``run_startup_discovery`` would otherwise run. Imported here (not at module
-    top) to avoid a circular import with ``kasa_service``.
+    Keys entries by ``stable_device_id`` (MAC-less fakes fall back to host), as
+    discovery would. Imported here, not at module top, to avoid a circular import
+    with ``kasa_service``.
     """
     from ..kasa_service import stable_device_id
 

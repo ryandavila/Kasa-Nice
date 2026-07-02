@@ -1,9 +1,8 @@
 """Shared test doubles for the Kasa-Nice backend.
 
-The fakes themselves live in :mod:`api.testing.fake_devices` so they can be
-shared with the ``KASA_FAKE_DEVICES`` runtime seam (which seeds the live
-registry for the browser end-to-end test) without duplicating them. This module
-re-exports them so existing tests keep importing ``from conftest import ...``.
+The fakes live in :mod:`api.testing.fake_devices` so the ``KASA_FAKE_DEVICES``
+seam can share them; this module re-exports them so tests keep importing
+``from conftest import ...``.
 """
 
 import pytest
@@ -30,13 +29,11 @@ __all__ = [
 
 @pytest.fixture(autouse=True)
 def _isolated_settings():
-    """Keep configuration hermetic across the whole suite.
+    """Keep configuration hermetic across the suite.
 
-    A developer's real repo-root ``.env`` must never change test outcomes, so we
-    seed a settings instance built from the process environment only
-    (``_env_file=None``) and drop it afterwards. Any code that reaches for
-    ``get_settings()`` during a test therefore sees a clean, dotenv-free slate;
-    tests that exercise env parsing build their own ``Settings`` and pass it in.
+    Seed a settings instance built from the environment only (``_env_file=None``)
+    so a developer's repo-root ``.env`` can't change test outcomes, and drop it
+    afterwards. Tests exercising env parsing build their own ``Settings``.
     """
     config.set_settings(config.Settings(_env_file=None))
     yield

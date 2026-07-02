@@ -49,10 +49,8 @@ router = APIRouter(prefix="/api")
 async def _set_power_many(device_ids: list[str], on: bool) -> PowerResult:
     """Switch many devices concurrently, tolerating per-device failure.
 
-    Fires every ``set_power`` at once and collects the outcomes: a device that
-    errors or no longer exists in the registry is reported under ``failed``
-    instead of aborting the batch. Callers publish the SSE update afterwards,
-    since the devices that did switch changed state.
+    A device that errors or no longer exists is reported under ``failed`` instead
+    of aborting the batch. Callers publish the SSE update afterwards.
     """
     results = await asyncio.gather(
         *(registry.set_power(device_id, on) for device_id in device_ids),
@@ -89,8 +87,8 @@ async def status() -> ServerStatus:
 
 @router.get("/devices", response_model=list[Device])
 async def list_devices() -> list[Device]:
-    # Append known-but-unreachable devices so they stay visible (grayed) in the UI
-    # rather than silently disappearing from their rooms and favorites.
+    # Append known-but-unreachable devices so they stay visible (grayed) instead
+    # of disappearing from rooms/favorites.
     return [
         serialize_device(d) for d in registry.all()
     ] + registry.unreachable_devices()
@@ -107,15 +105,13 @@ async def state() -> list[Device]:
 async def discover(req: DiscoverRequest) -> list[Device]:
     if req.target:
         devices = await registry.discover_target(req.target)
-        # A previously-unreachable host that just answered flips to reachable; push
-        # the fresh frame so every client's grayed card updates without waiting for
-        # the next tick (the retry affordance relies on this).
+        # A host that just answered flips to reachable; push the fresh frame so
+        # grayed cards update now (the retry affordance relies on this).
         await broadcaster.publish_now()
         return [serialize_device(d) for d in devices]
-    # Broadcast re-discovery from the UI's "Discover" button: refresh cloud-only
-    # devices too (e.g. an HS300 strip onboarded after startup), so they appear
-    # without a server restart. attach_cloud() is a no-op when the cloud fallback
-    # is disabled, and returning registry.all() includes the attached devices.
+    # Broadcast re-discovery: also refresh cloud-only devices (e.g. a strip
+    # onboarded after startup) so they appear without a restart. attach_cloud() is
+    # a no-op when the fallback is disabled.
     await registry.discover_all()
     await registry.attach_cloud()
     return [serialize_device(d) for d in registry.all()]
@@ -154,12 +150,10 @@ async def usage(device_id: str) -> Usage:
 async def energy_summary() -> EnergySummary:
     """Whole-home energy totals aggregated across every metered device.
 
-    Per-device usage is read concurrently; a device that errors (offline, or with
-    no energy monitoring) is skipped rather than failing the whole summary. Live
-    ``get_usage`` is the source — it already supplies live power plus today/month
-    totals for both local and cloud meters, so the history DB isn't needed here.
-    Null per-device readings count as zero; costs use the flat rate and stay null
-    when it's unset. With no metered devices the totals are zero (not a 404).
+    Per-device usage is read concurrently via ``get_usage``; a device that errors
+    (offline, or no metering) is skipped rather than failing the summary. Null
+    readings count as zero; costs use the flat rate and stay null when unset. No
+    metered devices => zero totals (not a 404).
     """
     results = await asyncio.gather(
         *(registry.get_usage(stable_device_id(d)) for d in registry.all()),
@@ -238,10 +232,9 @@ async def set_child_power(device_id: str, child_id: str, req: PowerRequest) -> D
 async def rename_device(device_id: str, req: RenameRequest) -> Device:
     """Rename a device, pushing the new name to connected clients immediately.
 
-    404 for an unknown id; 501 for cloud-only devices that can't be renamed via
-    this API (the frontend hides the affordance via ``can_rename``, but a direct
-    call is still rejected cleanly rather than hanging or 500ing). A device I/O
-    failure maps to the same ``{detail}`` shape the control endpoints return.
+    404 for an unknown id; 501 for cloud-only devices that can't be renamed (the
+    UI hides the affordance via ``can_rename``, but a direct call is still
+    rejected cleanly); 502 for a device I/O failure.
     """
     try:
         device = await registry.set_alias(device_id, req.alias)
@@ -296,9 +289,8 @@ async def device_history(
 ) -> EnergyHistory:
     """Persisted energy history: recent power samples plus daily totals.
 
-    History is recorded independently of discovery, so it can outlive a device's
-    presence in the registry. 404 only when the device is both unknown and has no
-    recorded samples.
+    Recorded independently of discovery, so it outlives a device's presence in
+    the registry. 404 only when the device is unknown AND has no samples.
     """
     since = int(time.time()) - hours * 3600
     samples = history.recent_samples(device_id, since)
@@ -374,24 +366,22 @@ async def set_favorites(req: Favorites) -> Favorites:
 
 @router.get("/schedules", response_model=list[Schedule])
 async def list_schedules() -> list[Schedule]:
-    # Re-validate stored rules through the model so a hand-edited or older file
-    # can't emit a malformed rule to the client; the store itself stays tolerant.
+    # Re-validate through the model so a hand-edited/older file can't emit a
+    # malformed rule to the client.
     return [Schedule(**s) for s in schedules.list_rules()]
 
 
 @router.post("/schedules", response_model=Schedule, status_code=201)
 async def create_schedule(req: ScheduleCreate) -> Schedule:
-    # ``req`` is already validated (time format, weekday range) by pydantic; the
-    # store stamps the id and null ``last_fired``. The scheduler picks the new
-    # rule up on its next minute tick — no restart or explicit reload needed.
+    # ``req`` is pydantic-validated; the store stamps id and null ``last_fired``.
+    # The scheduler picks it up on its next minute tick — no restart needed.
     return Schedule(**schedules.create_rule(req.model_dump()))
 
 
 @router.patch("/schedules/{schedule_id}", response_model=Schedule)
 async def update_schedule(schedule_id: str, req: ScheduleUpdate) -> Schedule:
-    # exclude_unset keeps this a true partial update: only the fields the client
-    # actually sent are written, so e.g. an enable/disable toggle leaves the
-    # time, days, and target exactly as they were.
+    # exclude_unset => true partial update: only sent fields are written, so an
+    # enable/disable toggle leaves time/days/target untouched.
     updated = schedules.update_rule(schedule_id, req.model_dump(exclude_unset=True))
     if updated is None:
         raise HTTPException(status_code=404, detail=f"Unknown schedule: {schedule_id}")

@@ -33,7 +33,7 @@ class DeviceStore {
 	error = $state<string | null>(null);
 	/** Device ids with an in-flight request, for per-card busy state. */
 	busy = $state<Record<string, boolean>>({});
-	/** Device ids with an in-flight retry probe, for the unreachable card's pending state. */
+	/** Device ids with an in-flight retry probe, for the unreachable card. */
 	retrying = $state<Record<string, boolean>>({});
 	/** Whether the last background poll reached the hub. */
 	live = $state(true);
@@ -72,8 +72,7 @@ class DeviceStore {
 			cur.is_on = f.is_on;
 			cur.brightness = f.brightness;
 			cur.hsv = f.hsv;
-			// A device can drop to unreachable (or come back) between frames; keep the
-			// flag current so its card grays out / re-lights in place.
+			// Keep reachable current so a device grays out / re-lights in place.
 			cur.reachable = f.reachable;
 			for (const fc of f.children) {
 				const cc = cur.children.find((c) => c.id === fc.id);
@@ -144,10 +143,9 @@ class DeviceStore {
 	}
 
 	/**
-	 * Subscribe to live state. Prefers a single Server-Sent Events stream (the
-	 * server pushes whenever it re-reads hardware); falls back to interval polling
-	 * when EventSource is unavailable or the stream can't be established (e.g. a
-	 * proxy that buffers it). Idempotent.
+	 * Subscribe to live state. Prefers a single SSE stream; falls back to interval
+	 * polling when EventSource is unavailable or the stream can't be established
+	 * (e.g. a buffering proxy). Idempotent.
 	 */
 	startLiveUpdates() {
 		if (typeof EventSource === 'undefined') {
@@ -169,9 +167,8 @@ class DeviceStore {
 			}
 		};
 		es.onerror = () => {
-			// EventSource reconnects on its own; reflect the drop in the meantime.
-			// If we never received a single frame, the stream is likely blocked, so
-			// fall back to polling to keep the UI live.
+			// EventSource reconnects itself; reflect the drop meanwhile. If no frame
+			// ever arrived the stream is likely blocked, so fall back to polling.
 			this.live = false;
 			if (!this.gotStreamFrame) this.startPolling();
 		};
@@ -228,10 +225,9 @@ class DeviceStore {
 
 	/**
 	 * Re-probe a known-but-unreachable device via the single-target discover API.
-	 * On success it's served live again: drop any stale unreachable placeholder for
-	 * that host (a never-read host is keyed by its host, but its live identity keys
-	 * by MAC, so the two would otherwise coexist) and merge in the fresh device.
-	 * The server also nudges the SSE stream, which settles every other client.
+	 * On success, drop any stale placeholder for that host (a never-read host is
+	 * keyed by host, but its live identity keys by MAC, so both would coexist) and
+	 * merge in the fresh device. The server also nudges the SSE stream.
 	 */
 	async retryDevice(device: Device) {
 		this.retrying[device.id] = true;
@@ -309,12 +305,11 @@ class DeviceStore {
 	}
 
 	/**
-	 * Fan a power action out over many devices: flip them optimistically, then
-	 * reconcile with the server's per-device result. A hard request failure reverts
-	 * everything; a partial failure rolls back only the devices that didn't switch
-	 * (keeping the successful ones), and toasts how many failed — the SSE stream
-	 * settles true state regardless. Affected devices are marked busy so a
-	 * concurrent poll can't clobber the optimistic flip mid-flight.
+	 * Fan a power action over many devices: flip optimistically, then reconcile
+	 * with the server's per-device result. A hard failure reverts everything; a
+	 * partial failure rolls back only the devices that didn't switch and toasts the
+	 * count. Affected devices are marked busy so a concurrent poll can't clobber
+	 * the optimistic flip.
 	 */
 	private async runMany(devices: Device[], on: boolean, action: () => Promise<PowerResult>) {
 		const prev = new Map(devices.map((d) => [d.id, d.is_on]));
@@ -370,7 +365,7 @@ class DeviceStore {
 		const child = device.children.find((c) => c.id === childId);
 		const prev = child?.is_on ?? false;
 		if (child) child.is_on = on; // optimistic
-		// childId is now the stable outlet id (not a name), so toast the alias.
+		// childId is the stable outlet id, so toast the alias instead.
 		toasts.push(`${child?.alias ?? childId} ${on ? 'on' : 'off'}`, on ? 'on' : 'off');
 		return this.run(
 			device.id,

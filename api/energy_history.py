@@ -1,15 +1,12 @@
 """Persistent energy-history recording.
 
-The python-kasa Energy module only exposes what a device itself remembers — a
-rolling current month of daily totals and the current year of monthly totals,
-all lost on a factory reset and capped by the device's own memory. To keep
-longer trends (and to retain history across resets), a background task samples
-each metered device on an interval and appends the readings to a small SQLite
-database, which the ``/history`` endpoint then serves.
+The python-kasa Energy module only exposes what a device remembers (a rolling
+month of daily totals, a year of monthly totals), lost on factory reset. To keep
+longer trends, a background task samples each metered device on an interval and
+appends readings to a small SQLite DB, which the ``/history`` endpoint serves.
 
-SQLite (stdlib ``sqlite3``) suits this naturally append-only time series and
-needs no extra dependency. A fresh connection is opened per operation so the
-store is safe to call from both the recorder's asyncio task and FastAPI's
+Stdlib ``sqlite3`` needs no extra dependency. A fresh connection per operation
+keeps the store safe to call from both the recorder's asyncio task and FastAPI's
 request threadpool without sharing a connection across threads.
 """
 
@@ -34,9 +31,9 @@ class EnergyHistoryStore:
     def _connect(self) -> sqlite3.Connection:
         """Open a connection, creating the schema on first use.
 
-        Lazy init keeps construction side-effect-free (so tests and import don't
-        touch the filesystem) and survives the DB file being deleted between
-        calls. WAL mode tolerates the recorder writing while a request reads.
+        Lazy init keeps construction side-effect-free and survives the DB file
+        being deleted between calls. WAL mode tolerates the recorder writing
+        while a request reads.
         """
         self.path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(self.path)
@@ -94,9 +91,9 @@ class EnergyHistoryStore:
     def daily_totals(self, device_id: str, days: int) -> list[tuple[str, float]]:
         """``(iso_date, kwh)`` per local day for the last ``days`` days, oldest first.
 
-        ``today_kwh`` resets at local midnight, so a day's energy is the largest
-        value seen on that local date — the reading just before the reset. Days
-        with no usable reading are omitted.
+        ``today_kwh`` resets at local midnight, so a day's energy is the max seen
+        on that local date (the reading just before reset). Days with no usable
+        reading are omitted.
         """
         cutoff = int(time.time()) - days * 86400
         try:
@@ -116,11 +113,10 @@ class EnergyHistoryStore:
     def migrate_device_id(self, old_id: str, new_id: str) -> None:
         """Re-point samples recorded under ``old_id`` to ``new_id``.
 
-        A one-time repair for history recorded when devices were keyed by LAN IP:
-        once a device's stable id is known, its old IP-keyed rows are re-pointed so
-        the energy chart stays continuous across a DHCP change instead of stranding
-        the old history under a dead IP. Best-effort — a failure is logged, never
-        raised, so it can't disrupt the discovery that triggers it.
+        One-time repair for history recorded when devices were keyed by LAN IP:
+        re-pointing keeps the energy chart continuous across a DHCP change instead
+        of stranding history under a dead IP. Best-effort — a failure is logged,
+        never raised, so it can't disrupt the discovery that triggers it.
         """
         try:
             with self._connect() as conn:
@@ -149,23 +145,21 @@ _RETENTION_SECONDS = 90 * 86400
 async def run_recorder(registry, store: EnergyHistoryStore, interval: float) -> None:
     """Periodically sample every metered device and persist the readings.
 
-    Launched as a background task at startup. Resilient by construction: a read
-    failure on one device is logged and skipped, the whole cycle is wrapped so a
-    bug can't kill the loop, and cancellation propagates for clean shutdown.
+    Background task launched at startup. Resilient: a per-device read failure is
+    skipped, the cycle is wrapped so a bug can't kill the loop, and cancellation
+    propagates for clean shutdown.
     """
     from .kasa_service import EnergyUnsupportedError, stable_device_id
 
     while True:
         try:
             for device in registry.all():
-                # Record under the device's stable id (not its LAN IP), so history
-                # survives a DHCP change and lines up with the ids the API serves.
+                # Key by stable id (not LAN IP) so history survives a DHCP change
+                # and lines up with the ids the API serves.
                 device_id = stable_device_id(device)
                 try:
-                    # Snapshot, not get_usage: the recorder stores only these
-                    # three scalars, so it skips the daily/monthly stats-table
-                    # fetches get_usage does — avoiding wasted device I/O every
-                    # cycle (get_usage still backs the /usage endpoint).
+                    # Snapshot, not get_usage: stores only three scalars, so it
+                    # skips the daily/monthly stats-table fetches get_usage does.
                     snapshot = await registry.read_energy_snapshot(device_id)
                 except EnergyUnsupportedError:
                     continue  # no energy meter; nothing to record
@@ -189,16 +183,13 @@ async def run_recorder(registry, store: EnergyHistoryStore, interval: float) -> 
 def load_sample_interval(settings: Settings | None = None) -> float:
     """Seconds between recorder cycles (``KASA_ENERGY_SAMPLE_INTERVAL``).
 
-    Defaults to 300s; floored at 10s so a misconfigured tiny value can't busy-loop.
-    Falls back to the default on a missing or invalid value. Parsing/clamping and
-    the warn-on-invalid live in ``api.config``; ``settings`` defaults to the
-    shared instance (tests pass an isolated one).
+    Parsing/clamping (default 300s, floored at 10s, warn-on-invalid) lives in
+    ``api.config``; ``settings`` defaults to the shared instance.
     """
     settings = settings or get_settings()
     return settings.kasa_energy_sample_interval
 
 
-# Module-level singleton, mirroring the registry/host-store pattern. The DB lives
-# at KASA_ENERGY_HISTORY_FILE (default ./data/energy_history.db); mount that path
-# as a volume to keep history across container rebuilds.
+# Module-level singleton. DB at KASA_ENERGY_HISTORY_FILE (default
+# ./data/energy_history.db); mount that path as a volume to keep history.
 history = EnergyHistoryStore(get_settings().kasa_energy_history_file)

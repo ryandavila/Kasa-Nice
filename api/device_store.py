@@ -1,8 +1,8 @@
 """Persistence for known device hosts.
 
 Discovery is cached in memory, so devices added by IP (when UDP broadcast can't
-reach them) would vanish on restart. This stores the set of known hosts to a
-small JSON file so they can be re-probed on startup.
+reach them) would vanish on restart. This persists the known hosts to a small
+JSON file so they can be re-probed on startup.
 """
 
 import json
@@ -40,21 +40,17 @@ class HostStore:
 class DeviceSnapshotStore:
     """Persists a small last-known identity record per host, keyed by LAN IP.
 
-    A device that stops answering discovery must not silently vanish from the UI
-    (it still occupies rooms/favorites), so when a device is successfully read we
-    stash a minimal identity snapshot here — id, alias, model, host, device_type,
-    and a strip's child ids/aliases. On a later failure the registry serves that
-    snapshot with ``reachable=False`` instead of dropping the device entirely.
+    So a device that stops answering discovery stays visible (it still occupies
+    rooms/favorites): on a successful read we stash a minimal identity snapshot
+    (id, alias, model, host, device_type, strip child ids/aliases); on a later
+    failure the registry serves it with ``reachable=False`` instead of dropping
+    the device.
 
-    Kept as its own file alongside the ``HostStore`` (rather than folded into it)
-    so the host store's plain string-list format — and every consumer of it —
-    stays untouched. Keyed by host because that's the key the registry already has
-    for a persisted-but-unreachable device (see ``HostStore``); the durable stable
-    id lives *inside* each record so rooms/favorites still match.
-
-    Records are opaque JSON dicts (a serialized ``Device``); this store neither
-    validates nor interprets them, mirroring ``HostStore``'s dumb-persistence role
-    and keeping it free of a schema import.
+    A separate file from ``HostStore`` so its string-list format stays untouched.
+    Keyed by host (the registry's key for a persisted-but-unreachable device);
+    the stable id lives inside each record so rooms/favorites still match.
+    Records are opaque JSON dicts (a serialized ``Device``) — neither validated
+    nor interpreted here, keeping this free of a schema import.
     """
 
     def __init__(self, path: Path) -> None:
@@ -68,8 +64,8 @@ class DeviceSnapshotStore:
         except (OSError, ValueError) as e:
             logger.warning(f"Could not read snapshot store {self.path}: {e}")
             return {}
-        # Tolerate anything but the expected {host: record} mapping (a hand-edited
-        # or older file) by ignoring it, exactly as HostStore does for its list.
+        # Ignore anything but the expected {host: record} mapping (a hand-edited
+        # or older file), as HostStore does for its list.
         if not isinstance(data, dict):
             return {}
         return {str(h): r for h, r in data.items() if isinstance(r, dict)}
@@ -77,7 +73,7 @@ class DeviceSnapshotStore:
     def save(self, snapshots: dict[str, dict]) -> None:
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            # Sorted by host for a stable, diff-friendly file (matches HostStore).
+            # Sorted by host for a stable, diff-friendly file.
             self.path.write_text(json.dumps(dict(sorted(snapshots.items())), indent=2))
         except OSError as e:
             logger.warning(f"Could not write snapshot store {self.path}: {e}")

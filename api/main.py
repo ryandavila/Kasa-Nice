@@ -26,8 +26,7 @@ try:
 except PackageNotFoundError:  # not installed (e.g. running from a bare checkout)
     __version__ = "0.0.0"
 
-# Built SvelteKit SPA (web/build). Present in production images; absent in dev,
-# where the frontend is served by the Vite dev server instead.
+# Built SvelteKit SPA. Present in production images; absent in dev (Vite serves it).
 WEB_BUILD_DIR = Path(__file__).resolve().parent.parent / "web" / "build"
 
 
@@ -35,33 +34,26 @@ WEB_BUILD_DIR = Path(__file__).resolve().parent.parent / "web" / "build"
 async def lifespan(app: FastAPI):
     setup_logging()
     logger.info("Starting Kasa-Nice API")
-    # Test-only seam, enabled via KASA_FAKE_DEVICES (see Settings.kasa_fake_devices).
     if get_settings().kasa_fake_devices:
-        # Test-only seam: seed the registry with fakes instead of scanning the
-        # network. One of them flips its state on every read, so the SSE stream's
-        # periodic re-reads surface a server-initiated change the browser never
-        # triggered — the live-update case the smoke test asserts. The energy
-        # recorder and scheduler are skipped to keep the fake run hermetic (no
-        # history or schedule-state writes).
+        # Test-only seam: seed fakes instead of scanning. One flips its state on
+        # every read, so the SSE stream surfaces a server-initiated change (the
+        # smoke test's live-update case). Recorder and scheduler are skipped to
+        # keep the fake run hermetic (no history/schedule writes).
         from .testing.fake_devices import seed_registry
 
         logger.warning("KASA_FAKE_DEVICES set; serving in-process fake devices")
         seed_registry(registry)
         tasks: tuple[asyncio.Task, ...] = ()
     else:
-        # Discovery (broadcast + subnet sweep + cloud) can take many seconds, so
-        # run it in the background and let the API serve immediately. The frontend
-        # watches registry.discovering (via /api/status) and surfaces devices as
-        # they appear, instead of blocking on an empty list at startup.
+        # Discovery takes many seconds; run it in the background so the API serves
+        # immediately (the frontend watches registry.discovering via /api/status).
         discovery = asyncio.create_task(registry.run_startup_discovery())
-        # Sample metered devices on an interval and persist the readings, so
-        # energy history survives beyond what each device remembers.
+        # Sample metered devices and persist readings beyond device memory.
         recorder = asyncio.create_task(
             run_recorder(registry, history, load_sample_interval())
         )
-        # Fire server-side schedule rules on the local clock, so timers work for
-        # both local and cloud-fallback devices and keep running with no browser
-        # open.
+        # Fire schedule rules on the local clock, so timers work for both local
+        # and cloud devices and keep running with no browser open.
         scheduler = asyncio.create_task(
             run_scheduler(schedules, registry, groups, broadcaster)
         )

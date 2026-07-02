@@ -1,15 +1,10 @@
 import { test, expect } from '@playwright/test';
 
-// One end-to-end smoke test that drives a real browser against the production
-// build served by the API (with KASA_FAKE_DEVICES=1). It exercises the full
-// wiring the unit tests can't: SPA -> REST -> registry, and the live SSE stream.
-//
-// The seeded fakes (see api/testing/fake_devices.py):
-//   - "Living Room Lamp" — a plain plug, starts off, toggled by hand here.
-//   - "Reading Bulb"      — a colour bulb, for card variety.
-//   - "Porch Light"       — a plug that flips its own state on every server-side
-//                           read, so the SSE stream pushes a change the browser
-//                           never initiated (the live-update assertion below).
+// End-to-end smoke test: drives a real browser against the production build the
+// API serves (KASA_FAKE_DEVICES=1), exercising SPA -> REST -> registry and the
+// live SSE stream. Seeded fakes (see api/testing/fake_devices.py): "Living Room
+// Lamp" (plain plug, toggled by hand), "Reading Bulb" (colour bulb), and "Porch
+// Light" (flips its own state on every read, driving the live-update assertion).
 test('loads, renders cards, toggles a device, and reflects an SSE-driven change', async ({
 	page
 }) => {

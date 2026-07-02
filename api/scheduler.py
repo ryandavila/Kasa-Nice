@@ -2,27 +2,21 @@
 
 A single asyncio task, started in ``main``'s lifespan, wakes once a minute and
 fires any rule whose ``time`` and ``days`` match the current *local* wall clock.
-It is modelled on ``energy_history.run_recorder``: resilient (one bad rule or a
-whole failed cycle is logged, never fatal), and cancellable for clean shutdown.
+Modelled on ``run_recorder``: resilient (a bad rule or failed cycle is logged,
+never fatal) and cancellable for clean shutdown.
 
-Firing routes through the same code paths the REST API uses so behaviour is
-identical whether a human or a timer flips a switch: device rules go through
-``registry.set_power`` and room rules reuse ``routes._set_power_many`` (the
-partial-failure-tolerant fan-out), then a single ``broadcaster.publish_now()``
-pushes the change to connected clients.
+Firing routes through the same code paths the REST API uses: device rules through
+``registry.set_power``, room rules through ``routes._set_power_many``, then one
+``broadcaster.publish_now()``.
 
-Tick strategy — why a minute *cursor* instead of ``sleep(60)``:
-    A fixed 60s sleep drifts (each cycle does real work first) and would slowly
-    slide off the minute boundary, and a slow cycle or a suspended process could
-    make a scheduled minute pass unseen. Instead we sleep until just past the
-    next minute boundary (recomputed from the clock each loop, so drift can't
-    accumulate) and track the last minute we evaluated. Each wake-up processes
-    every whole minute strictly after the cursor up to now — so a scheduled
-    minute is never *missed* (a short overrun is caught up) and never *double-
-    fired* (the cursor only moves forward; a repeat wake in the same minute
-    evaluates nothing). A long gap (laptop sleep, container pause) is capped:
-    replaying hours of on/off toggles would be worse than skipping them, so past
-    a small threshold we act only on the current minute.
+Tick strategy — a minute *cursor*, not ``sleep(60)``: a fixed sleep drifts off
+the minute boundary, and a slow cycle or suspended process could make a scheduled
+minute pass unseen. Instead sleep until just past the next boundary (recomputed
+each loop so drift can't accumulate) and track the last minute evaluated. Each
+wake processes every whole minute strictly after the cursor up to now — so a
+minute is never missed (a short overrun catches up) nor double-fired (the cursor
+only moves forward). A long gap (laptop sleep, container pause) is capped to the
+current minute rather than replaying a backlog of toggles.
 """
 
 import asyncio
@@ -33,22 +27,20 @@ from .routes import _set_power_many
 
 logger = get_logger(__name__)
 
-# Beyond this many missed minutes we assume the process was suspended (sleep,
-# pause, debugger) rather than merely slow, and act on the current minute only
-# instead of replaying a backlog of stale actions.
+# Beyond this many missed minutes, assume the process was suspended (not merely
+# slow) and act on the current minute only, not a backlog of stale actions.
 _MAX_CATCHUP_MINUTES = 2
 
-# The only rule kind v1 knows how to run. Rules of any other kind (written by a
-# newer build, then downgraded) are skipped rather than erroring the cycle.
+# The only rule kind v1 runs; others (from a newer build, downgraded) are skipped
+# rather than erroring the cycle.
 _SUPPORTED_KIND = "fixed_time"
 
 
 def _local_now() -> datetime.datetime:
     """Current time as a timezone-aware datetime in the server's local zone.
 
-    Schedules are wall-clock ("turn the porch light on at 18:00"), so evaluation
-    must use local time — and stay correct across DST shifts, which ``astimezone``
-    with the system zone handles.
+    Schedules are wall-clock, so evaluation uses local time and stays correct
+    across DST shifts (which ``astimezone`` with the system zone handles).
     """
     return datetime.datetime.now().astimezone()
 
@@ -56,9 +48,8 @@ def _local_now() -> datetime.datetime:
 def rule_due_at(rule: dict, minute: datetime.datetime) -> bool:
     """Whether ``rule`` should fire during the given local ``minute``.
 
-    Pure and side-effect-free so the "which rules are due" decision is unit
-    testable without a clock. ``minute`` is expected already truncated to the
-    minute; a rule matches when it's enabled, of a supported kind, its weekday is
+    Pure, so the decision is testable without a clock. ``minute`` is truncated to
+    the minute; a rule matches when enabled, of a supported kind, its weekday is
     listed, and its HH:MM equals the minute's.
     """
     if not rule.get("enabled", False):
@@ -82,10 +73,9 @@ def minutes_to_evaluate(
 ) -> list[datetime.datetime]:
     """Minutes to evaluate this wake-up, given the cursor and now (pure).
 
-    Enumerates every whole minute strictly after ``last`` through ``current`` so
-    a brief overrun still catches missed minutes, while a repeat wake in the same
-    minute yields nothing (no double-fire). A gap larger than ``max_catchup`` is
-    treated as a suspended process and collapses to just ``current``.
+    Every whole minute strictly after ``last`` through ``current``, so an overrun
+    catches missed minutes and a repeat wake in the same minute yields nothing. A
+    gap larger than ``max_catchup`` collapses to just ``current``.
     """
     if last is None:
         return [current]
@@ -101,8 +91,7 @@ async def fire_rule(rule: dict, *, registry, groups) -> str:
     """Apply one rule's action to its target; return a short result string.
 
     Never raises: a device error, missing device, or unknown room becomes a
-    descriptive result the caller records as the rule's ``last_fired``. Room
-    rules reuse the routes fan-out, which already tolerates per-device failure.
+    descriptive result recorded as the rule's ``last_fired``.
     """
     on = rule.get("action") == "on"
     target = rule.get("target") or {}
@@ -137,9 +126,8 @@ async def fire_rule(rule: dict, *, registry, groups) -> str:
 async def run_tick(store, minute: datetime.datetime, *, registry, groups, broadcaster):
     """Fire every rule due in ``minute``, record results, and push one update.
 
-    Records each rule's outcome via ``mark_fired`` (stamped with the scheduled
-    minute, so it's deterministic) and, if anything was due, nudges the SSE
-    broadcaster once so connected clients see the state change immediately.
+    Records each outcome via ``mark_fired`` (stamped with the scheduled minute,
+    so it's deterministic) and, if anything was due, nudges the broadcaster once.
     """
     due = due_rules(store.list_rules(), minute)
     if not due:
@@ -164,10 +152,9 @@ def _seconds_until_next_minute(now: datetime.datetime) -> float:
 async def run_scheduler(store, registry, groups, broadcaster, *, now_fn=_local_now):
     """Evaluate schedule rules once a minute until cancelled.
 
-    Launched as a background task at startup. Resilient by construction: a bad
-    rule is contained in ``fire_rule``, a failed cycle is logged and the loop
-    continues, and cancellation propagates for clean shutdown. ``now_fn`` is
-    injectable so tests can drive it without a real clock.
+    Background task launched at startup. Resilient: a bad rule is contained in
+    ``fire_rule``, a failed cycle is logged and the loop continues, cancellation
+    propagates. ``now_fn`` is injectable so tests can drive it without a clock.
     """
     last_minute: datetime.datetime | None = None
     while True:

@@ -1,21 +1,16 @@
 """Persistence for server-side schedule rules ("timers").
 
-A schedule rule says "at HH:MM on {days of week}, turn {a device|a room}
-{on|off}". Rules live on the server (not in the browser) so they fire uniformly
-for both locally-controlled and cloud-fallback devices, and keep running while
-no browser is open — the frontend is just an editor over this store.
+A rule says "at HH:MM on {days}, turn {a device|a room} {on|off}". Rules live on
+the server so they fire for both local and cloud devices and keep running with no
+browser open — the frontend is just an editor over this store.
 
-Stored in one small JSON file, mirroring the tolerant load/save style of
-``GroupStore``: any read problem degrades to an empty document rather than
-raising, so a corrupt or missing file can never take the server down. The rule
-*shape* is validated at the API boundary (pydantic in ``schemas.py``); this
-layer just persists dicts and does the id bookkeeping.
+One small JSON file, tolerant load/save like ``GroupStore`` (a read problem
+degrades to an empty document). Rule *shape* is validated at the API boundary
+(``schemas.py``); this layer just persists dicts and does id bookkeeping.
 
-Forward compatibility: rules carry a ``kind`` discriminator (``"fixed_time"`` in
-v1). Newer versions may add kinds (sunrise/sunset, one-shot timers) or richer
-actions; because this store passes rule dicts through untouched, a rule written
-by a newer build survives a downgrade here intact (the scheduler simply skips
-kinds it doesn't understand) instead of being dropped on the next write.
+Rules carry a ``kind`` discriminator (``"fixed_time"`` in v1). Since this store
+passes dicts through untouched, a rule written by a newer build (with a kind the
+scheduler skips) survives a downgrade intact instead of being dropped.
 """
 
 import json
@@ -70,8 +65,7 @@ class ScheduleStore:
     def create_rule(self, rule: dict) -> dict:
         """Persist a new rule, assigning it a fresh id and no fire history."""
         data = self._read()
-        # Server owns the id and ``last_fired`` so the client can't spoof either;
-        # everything else is the validated payload the caller passes in.
+        # Server owns id and ``last_fired`` so the client can't spoof either.
         stored = {**rule, "id": uuid.uuid4().hex, "last_fired": None}
         data["schedules"].append(stored)
         self._write(data)
@@ -80,9 +74,8 @@ class ScheduleStore:
     def update_rule(self, rule_id: str, fields: dict[str, Any]) -> dict | None:
         """Merge ``fields`` into a rule; returns it, or None if the id is unknown.
 
-        Only the keys present in ``fields`` are touched (a partial PATCH), and
-        ``id`` is never overwritten so a stray ``id`` in the payload can't re-key
-        a rule out from under the caller.
+        Only keys present in ``fields`` are touched (partial PATCH); ``id`` is
+        never overwritten, so a stray ``id`` in the payload can't re-key a rule.
         """
         data = self._read()
         for rule in data["schedules"]:
@@ -105,14 +98,13 @@ class ScheduleStore:
     def mark_fired(self, rule_id: str, ts: int, result: str) -> dict | None:
         """Record a rule's most recent firing (unix ts + human-readable result).
 
-        Called by the scheduler after each attempt so the UI can show "last run"
-        and whether it succeeded. Best-effort like the rest of the store: a write
-        failure is swallowed, since losing the audit note must never abort a rule.
+        Called by the scheduler after each attempt so the UI can show "last run".
+        Best-effort: a write failure is swallowed, since losing the audit note
+        must never abort a rule.
         """
         return self.update_rule(rule_id, {"last_fired": {"ts": ts, "result": result}})
 
 
-# Module-level singleton, mirroring the group/host-store pattern. Lives at
-# KASA_SCHEDULES_FILE (default ./data/schedules.json); mount that path as a
-# volume to keep schedule rules across container rebuilds.
+# Module-level singleton. Lives at KASA_SCHEDULES_FILE (default
+# ./data/schedules.json); mount that path as a volume to keep schedule rules.
 schedules = ScheduleStore(get_settings().kasa_schedules_file)

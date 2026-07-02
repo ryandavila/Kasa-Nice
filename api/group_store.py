@@ -1,12 +1,9 @@
 """Persistence for user-defined device groups (rooms) and favorites.
 
-Discovery gives a flat list of devices; this lets the user organize them into
-named rooms and star the ones they reach for most. Groups and favorites are a
-pure UI concern, decoupled from discovery — they reference stable device ids
-(normalized MAC, or host when no MAC is available; see ``stable_device_id``)
-and may name a device that is currently offline or absent, which is fine and
-intended. Stored in one small JSON file, mirroring the tolerant load/save
-style of ``HostStore``.
+Lets the user organize the flat device list into named rooms and star favorites.
+A pure UI concern, decoupled from discovery: entries reference stable device ids
+(see ``stable_device_id``) and may name an offline or absent device, which is
+intended. Stored in one small JSON file, tolerant load/save like ``HostStore``.
 """
 
 import json
@@ -113,12 +110,11 @@ class GroupStore:
     def migrate_device_id(self, old_id: str, new_id: str) -> bool:
         """Re-key a device across every room and the favorites list, in place.
 
-        A one-time repair for data written when devices were keyed by LAN IP:
-        wherever a room or the favorites still reference ``old_id`` (the device's
-        former host), swap in ``new_id`` (its stable id) so the room membership and
-        favorite star follow the device across a DHCP IP change. De-duplicates in
-        case both ids were somehow present. Returns whether anything changed, and
-        only writes when it did, so re-running is cheap and harmless.
+        One-time repair for data written when devices were keyed by LAN IP: swap
+        ``old_id`` (former host) for ``new_id`` (stable id) so room membership and
+        the favorite star follow the device across a DHCP change. De-dupes if both
+        ids are present. Returns whether anything changed, writing only when it
+        did, so re-running is cheap.
         """
         data = self._read()
         changed = False
@@ -148,7 +144,6 @@ class GroupStore:
         return data["favorites"]
 
 
-# Module-level singleton, mirroring the registry/host-store pattern. Lives at
-# KASA_GROUPS_FILE (default ./data/groups.json); mount that path as a volume to
-# keep rooms and favorites across container rebuilds.
+# Module-level singleton. Lives at KASA_GROUPS_FILE (default ./data/groups.json);
+# mount that path as a volume to keep rooms and favorites.
 groups = GroupStore(get_settings().kasa_groups_file)

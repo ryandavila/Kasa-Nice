@@ -1,8 +1,4 @@
-"""Discovery and control of Kasa devices, decoupled from any UI framework.
-
-This is the logic that previously lived inside the NiceGUI page handlers in
-``main.py``, reshaped into a small service the REST routes can call.
-"""
+"""Discovery and control of Kasa devices, decoupled from any UI framework."""
 
 import asyncio
 import ipaddress
@@ -69,22 +65,17 @@ class EnergyUnsupportedError(LookupError):
 class RenameUnsupportedError(RuntimeError):
     """Raised when a device/outlet can't be renamed through this API.
 
-    The cloud façade (``CloudDevice``/``CloudChild``) only wires up the passthrough
-    commands we need for power and energy — it exposes no ``set_alias`` — so a
-    rename of a cloud-controlled device is rejected up front rather than silently
-    doing nothing or hanging on an unsupported call.
+    The cloud façade exposes no ``set_alias``, so a rename of a cloud device is
+    rejected up front rather than silently no-op'ing or hanging.
     """
 
 
 def stable_device_id(device: KasaDevice) -> str:
     """The durable identity used to key a device, resilient to DHCP IP changes.
 
-    Prefers the device's MAC — normalized (separators stripped, upper-cased) via
-    the shared ``_norm_mac`` so locally- and cloud-discovered views of the same
-    hardware agree — because a MAC is burned into the device and survives it being
-    handed a new IP. Falls back to the LAN ``host`` only when no MAC is reported,
-    preserving the historical behaviour for the rare device that lacks one. The
-    ``host`` stays a separate field for connection and display.
+    Prefers the MAC — normalized via ``_norm_mac`` so local and cloud views of the
+    same hardware agree — since it survives a new IP. Falls back to ``host`` only
+    when no MAC is reported (``host`` stays a separate connection/display field).
     """
     mac = getattr(device, "mac", None)
     if mac:
@@ -95,11 +86,9 @@ def stable_device_id(device: KasaDevice) -> str:
 def stable_child_id(child: Any) -> str:
     """The durable identity of a strip outlet, resilient to it being renamed.
 
-    python-kasa child devices expose ``device_id`` (the parent's id plus a slot
-    suffix); the cloud façade's ``CloudChild`` exposes the equivalent ``child_id``.
-    Either is stable across an outlet being renamed in the Kasa app, unlike the
-    alias, and can't collide. Falls back to the alias only when no stable id is
-    present (e.g. an older fake or firmware that omits it).
+    python-kasa children expose ``device_id`` (parent id + slot); ``CloudChild``
+    exposes the equivalent ``child_id``. Either is stable across a rename, unlike
+    the alias. Falls back to the alias only when no stable id is present.
     """
     cid = getattr(child, "device_id", None) or getattr(child, "child_id", None)
     return cid or child.alias
@@ -108,10 +97,9 @@ def stable_child_id(child: Any) -> str:
 class EnergySnapshot(NamedTuple):
     """The three live scalars the background energy recorder persists.
 
-    Deliberately just what ``EnergyHistoryStore.record`` stores — no history
-    tables — so ``read_energy_snapshot`` can skip the per-device stats fetches
-    that ``get_usage`` needs for the ``/usage`` endpoint but the recorder throws
-    away every cycle.
+    Just what ``EnergyHistoryStore.record`` stores (no history tables), so
+    ``read_energy_snapshot`` can skip the per-device stats fetches ``get_usage``
+    needs but the recorder discards every cycle.
     """
 
     power_w: float | None
@@ -137,29 +125,25 @@ class DeviceRegistry:
         group_store: GroupStore | None = None,
         history_store: EnergyHistoryStore | None = None,
     ) -> None:
-        # Devices are keyed by their stable id (see ``stable_device_id``), NOT by
-        # host, so a plug handed a new IP keeps its slot, history, room, and star.
+        # Keyed by stable id (see ``stable_device_id``), NOT host, so a plug handed
+        # a new IP keeps its slot, history, room, and star.
         self._devices: dict[str, KasaDevice] = {}
-        # Devices controlled through the TP-Link cloud (e.g. HS300 strips whose
-        # firmware dropped local control). Kept separate so local re-discovery,
-        # which rebuilds ``_devices``, never evicts them. They duck-type the
-        # python-kasa interface, so the rest of the registry treats them alike.
+        # Cloud-controlled devices (e.g. HS300 strips that dropped local control),
+        # kept separate so local re-discovery (which rebuilds ``_devices``) can't
+        # evict them. They duck-type the python-kasa interface.
         self._cloud_devices: dict[str, KasaDevice] = {}
         self._cloud_client = cloud_client
         self._cloud_models = cloud_models
-        # Each cloud refresh is a round-trip to TP-Link's servers, so the state
-        # poll refreshes cloud devices at most this often (seconds) instead of
-        # every few seconds like local devices — keeping polls fast and avoiding
-        # cloud rate limits. ``-inf`` forces a refresh on the first poll.
+        # Each cloud refresh is a TP-Link round-trip, so the state poll refreshes
+        # cloud devices at most this often (seconds), keeping polls fast and
+        # avoiding rate limits. ``-inf`` forces a refresh on the first poll.
         self._cloud_poll_interval = cloud_poll_interval
         self._last_cloud_refresh: float = float("-inf")
         self._store = store
-        # Last-known identity of every device we've successfully read, keyed by the
-        # host it was read at. Lets a device that later stops answering discovery
-        # be shown (grayed, reachable=False) from its snapshot instead of vanishing
-        # from its rooms/favorites. Held in memory (write-through on persist) so the
-        # hot path — serializing unreachable devices into every SSE frame — never
-        # touches disk. Seeded from the store so snapshots survive a restart.
+        # Last-known identity per read device, keyed by host. Lets a device that
+        # stops answering discovery show (grayed) from its snapshot. Held in memory
+        # so serializing unreachable devices into every SSE frame never hits disk;
+        # seeded from the store so snapshots survive a restart.
         self._snapshot_store = snapshot_store
         self._snapshots: dict[str, Device] = {}
         if snapshot_store is not None:
@@ -168,56 +152,47 @@ class DeviceRegistry:
                     self._snapshots[host] = Device(**raw)
                 except Exception as e:  # noqa: BLE001 - a bad record must not break startup
                     logger.warning(f"Ignoring unreadable snapshot for {host}: {e}")
-        # Passed to every Discover.discover() call. Newer SMART-protocol devices
-        # authenticate before discovery; None (no creds) leaves legacy plugs
-        # working and is equivalent to omitting the argument.
+        # Passed to every Discover.discover(). SMART-protocol devices authenticate
+        # before discovery; None leaves legacy plugs working.
         self._credentials = credentials
-        # Optional CIDR (e.g. "192.168.1.0/24") swept by unicast on startup and from
-        # the Discovery tab — for devices on a separate subnet/VLAN that broadcast
-        # discovery can't reach.
+        # Optional CIDR swept by unicast for devices on a separate subnet/VLAN that
+        # broadcast discovery can't reach.
         self.scan_subnet = scan_subnet
-        # Optional flat $/kWh rate (and its currency prefix) for showing energy
-        # cost. A flat-rate APPROXIMATION — no tiered or time-of-use billing.
-        # When energy_rate is None, cost fields stay null and nothing changes.
+        # Optional flat $/kWh rate (and currency prefix) for energy cost — an
+        # APPROXIMATION (no tiered/time-of-use billing). None => cost fields null.
         self.energy_rate = energy_rate
         self.energy_currency = energy_currency
         # Hosts that answered discovery but couldn't be read (failed auth). Unlike
-        # genuinely-offline hosts, these respond — so they're candidates for cloud
-        # control, and we surface a hint about them when the fallback is off.
+        # offline hosts these respond, so they're cloud-control candidates and we
+        # hint about them when the fallback is off.
         self._unreadable_hosts: set[str] = set()
-        # True while the initial network sweep is running. Exposed via /api/status
-        # so the UI can show a "scanning…" state instead of an empty list — the
-        # sweep is launched in the background so the API serves immediately.
+        # True while the initial sweep runs; exposed via /api/status so the UI
+        # shows "scanning…" instead of an empty list (the sweep runs in the
+        # background so the API serves immediately).
         self.discovering: bool = False
-        # Durable stores that keyed data by the old IP-as-id. When a device's
-        # stable id is first learned this process, any of its data still filed
-        # under the old host is lazily re-keyed (see ``_migrate_identity``). Left
-        # None in tests that don't exercise migration, in which case it's a no-op.
+        # Durable stores that once keyed data by IP-as-id; a device's IP-keyed data
+        # is lazily re-keyed to its stable id on first sight (see
+        # ``_migrate_identity``). None in tests => no-op.
         self._group_store = group_store
         self._history_store = history_store
-        # Stable ids already migrated this process, so the one-time lazy migration
-        # runs at most once per device rather than on every re-discovery.
+        # Stable ids already migrated this process, so migration runs at most once
+        # per device.
         self._migrated_ids: set[str] = set()
 
     def _hosts(self) -> set[str]:
         """LAN hosts of the currently-cached local devices.
 
-        The device dicts are keyed by stable id now, so the host store (which
-        persists IPs to re-probe) and the cloud-IP resolver derive hosts from the
-        device objects rather than from the dict keys.
+        Derived from the device objects, not the dict keys (which are stable ids).
         """
         return {d.host for d in self._devices.values()}
 
     def _migrate_identity(self, host: str, stable_id: str) -> None:
         """Re-key any durable data still filed under ``host`` to ``stable_id``.
 
-        Rooms/favorites (``groups.json``) and the energy-history DB used to key a
-        device by its LAN IP. Once we know a device's (host, stable-id) pair we
-        rewrite those entries in place, so a plug that changed IP keeps its star,
-        room, and energy chart. Runs at most once per device per process and is
-        fully best-effort — a failure is logged and swallowed so it can never take
-        down discovery. A no-op when the id already equals the host (no MAC, so
-        nothing changed) or when no stores are wired in (tests).
+        Rooms/favorites and the energy-history DB once keyed by LAN IP; rewriting
+        in place keeps a plug's star, room, and chart across an IP change. Runs at
+        most once per device per process, best-effort (a failure is logged, never
+        raised). No-op when the id equals the host or no stores are wired in.
         """
         if stable_id == host or stable_id in self._migrated_ids:
             return
@@ -236,17 +211,15 @@ class DeviceRegistry:
     async def _refresh(self, device: KasaDevice) -> bool:
         """Pull live state. Returns False if the device couldn't be read.
 
-        An un-readable device (bad credentials, offline) has no usable data, so
-        callers skip caching it — otherwise serializing it later would raise and
-        take down the whole device list.
+        Callers skip caching an unreadable device (bad creds, offline) — else
+        serializing it later would raise and take down the whole device list.
         """
         try:
             await device.update()
             return True
         except AuthenticationError as e:
-            # Expected for devices that dropped local auth (e.g. HS300 strips):
-            # the discovery caller logs a contextual warning, and they're handled
-            # via the cloud fallback (or its hint), so this isn't a hard error.
+            # Expected for devices that dropped local auth (e.g. HS300 strips);
+            # handled via the cloud fallback, so not a hard error.
             logger.debug(f"Local auth failed for {device.host}: {e}")
             return False
         except Exception as e:  # noqa: BLE001 - one bad device shouldn't break the rest
@@ -257,13 +230,10 @@ class DeviceRegistry:
     async def _safe_disconnect(device: KasaDevice) -> None:
         """Release a dropped device's transport (its aiohttp session/connector).
 
-        python-kasa opens a client session during discovery. When we discard a
-        device — failed auth, offline, or probed only for its MAC — without
-        disconnecting, that session is garbage-collected while still open and
-        asyncio logs "Unclosed client session"/"Unclosed connector" at startup.
-        Only ever called on devices we are NOT keeping, so it never closes a
-        device still in the registry. Best-effort: a device that never connected
-        raises, which we swallow.
+        Discovery opens a client session; discarding a device without
+        disconnecting leaks it as "Unclosed client session" at startup. Only
+        called on devices we're NOT keeping. Best-effort: a device that never
+        connected raises, which we swallow.
         """
         disconnect = getattr(device, "disconnect", None)
         if disconnect is None:
@@ -276,40 +246,34 @@ class DeviceRegistry:
     async def _store_device(self, device: KasaDevice) -> None:
         """Cache a readable device, disconnecting any object it supersedes.
 
-        Re-discovery (e.g. the subnet sweep after a broadcast, or a manual
-        re-scan) returns a *fresh* device object for a device we already hold. If
-        we just overwrote the slot, the previous object's still-open aiohttp
-        session would be orphaned and later log "Unclosed client session". So
-        release the old one first. Keyed by the stable id, so the same physical
-        device re-discovered at a new IP updates its existing slot rather than
-        forking into a second identity.
+        Re-discovery returns a fresh object for a device we already hold;
+        overwriting the slot would orphan the old object's open session
+        ("Unclosed client session"), so release it first. Keyed by stable id, so
+        the same device at a new IP updates its slot rather than forking.
         """
         stable_id = stable_device_id(device)
         old = self._devices.get(stable_id)
         if old is not None and old is not device:
             await self._safe_disconnect(old)
         self._devices[stable_id] = device
-        # Now that the (host, stable-id) pair is known, fold any IP-keyed history
-        # or room/favorite data onto the stable id (once per device per process).
+        # Fold any IP-keyed history/room/favorite data onto the stable id.
         self._migrate_identity(device.host, stable_id)
-        # Refresh the last-known snapshot while the device is readable, so if it
-        # later drops off discovery we can still show its identity. Kept in memory;
-        # flushed to disk by ``_persist`` at the end of the discovery pass (rather
-        # than here) so a 254-host subnet sweep doesn't rewrite the file per device.
+        # Refresh the last-known snapshot while readable, so a later drop-off can
+        # still show identity. Flushed to disk by ``_persist`` at the end of the
+        # pass, not here, so a subnet sweep doesn't rewrite the file per device.
         if self._snapshot_store is not None:
             self._snapshots[device.host] = self._snapshot_of(device)
 
     def _persist(self) -> None:
         """Save the union of known and currently-cached hosts.
 
-        Hosts aren't dropped when temporarily offline, so a plug that's
-        unplugged during a scan is still re-probed on the next startup.
+        Offline hosts aren't dropped, so a plug unplugged during a scan is still
+        re-probed on the next startup.
         """
         if self._store is None:
             return
         self._store.save(self._store.load() | self._hosts())
-        # Flush the in-memory identity snapshots gathered this pass alongside the
-        # host list, so an unreachable device can be reconstructed after a restart.
+        # Flush the in-memory snapshots so an unreachable device survives a restart.
         if self._snapshot_store is not None:
             self._snapshot_store.save(
                 {host: snap.model_dump() for host, snap in self._snapshots.items()}
@@ -341,8 +305,8 @@ class DeviceRegistry:
         logger.info("Starting device discovery")
         discovered = await Discover.discover(credentials=self._credentials)
         self._unreadable_hosts = set()
-        # A re-scan rebuilds the cache with fresh device objects; release the
-        # previous ones so their aiohttp sessions don't leak as "Unclosed".
+        # Re-scan rebuilds the cache with fresh objects; release the previous ones
+        # so their sessions don't leak as "Unclosed".
         previous = self._devices
         self._devices = {}
         for d in discovered.values():
@@ -357,8 +321,8 @@ class DeviceRegistry:
             for host in self._store.load() - self._hosts():
                 await self._probe_host(host)
 
-        # Devices from the prior scan that weren't re-cached are now orphaned;
-        # disconnect them (by identity, never closing a device we kept).
+        # Disconnect prior-scan devices that weren't re-cached (by identity, never
+        # closing a device we kept).
         kept = set(map(id, self._devices.values()))
         for old in previous.values():
             if id(old) not in kept:
@@ -371,19 +335,17 @@ class DeviceRegistry:
     async def run_startup_discovery(self) -> None:
         """Run the full initial discovery, flagging ``discovering`` throughout.
 
-        Broadcast discovery, an optional subnet sweep, and the cloud attach can
-        together take many seconds, so this is launched as a background task at
-        startup (the API serves immediately). The ``discovering`` flag lets the
-        frontend show progress and surface devices as they appear, rather than a
-        misleading empty list. Never raises — startup must not depend on it.
+        Launched as a background task at startup (broadcast + optional subnet
+        sweep + cloud attach take many seconds; the API serves immediately). The
+        ``discovering`` flag lets the frontend show progress. Never raises.
         """
         self.discovering = True
         try:
             await self.discover_all()
             if self.scan_subnet:
                 await self.discover_subnet(self.scan_subnet)
-            # After local discovery, so cloud devices already reachable locally
-            # are skipped and the rest can be paired with their LAN IPs.
+            # After local discovery, so locally-reachable cloud devices are
+            # skipped and the rest can be paired with their LAN IPs.
             await self.attach_cloud()
             self.log_cloud_fallback_hint()
         except Exception as e:  # noqa: BLE001 - never let startup discovery crash
@@ -416,9 +378,8 @@ class DeviceRegistry:
     ) -> list[KasaDevice]:
         """Unicast-probe every host in a CIDR subnet and cache the readable ones.
 
-        Broadcast discovery can't cross subnet/VLAN boundaries, so for devices on
-        an isolated network (e.g. an IoT VLAN) we sweep each address directly.
-        Raises ``ValueError`` if ``subnet`` is not a valid CIDR.
+        Broadcast discovery can't cross subnet/VLAN boundaries, so sweep each
+        address directly. Raises ``ValueError`` on an invalid CIDR.
         """
         try:
             network = ipaddress.ip_network(subnet, strict=False)
@@ -456,13 +417,10 @@ class DeviceRegistry:
     async def refresh_all(self) -> list[KasaDevice]:
         """Re-read live state from cached devices (no network discovery).
 
-        Used by the frontend poll so the UI reflects changes made elsewhere
-        (e.g. the Kasa app or a physical switch). Local devices refresh on every
-        call; cloud devices are throttled to ``cloud_poll_interval`` seconds,
-        since each cloud refresh is a TP-Link round-trip — polling them as often
-        as local devices is slow and risks rate limiting. They remain in the
-        returned list with their last-known state between refreshes. (Explicit
-        actions like toggling a cloud outlet still refresh it immediately.)
+        Local devices refresh every call; cloud devices are throttled to
+        ``cloud_poll_interval`` seconds (each cloud refresh is a TP-Link
+        round-trip) and keep their last-known state in the returned list between
+        refreshes. Explicit actions still refresh a cloud device immediately.
         """
         to_refresh = list(self._devices.values())
         cloud = list(self._cloud_devices.values())
@@ -480,11 +438,9 @@ class DeviceRegistry:
     def _snapshot_of(self, device: KasaDevice) -> Device:
         """A neutralized identity snapshot of a currently-readable device.
 
-        Reuses ``serialize_device`` for the identity fields (id, alias, model,
-        host, device_type, child ids/aliases) but blanks the volatile live state:
-        a device served later from this snapshot is *unreachable*, so implying a
-        stale on/brightness/color reading (or that it still has a working light or
-        emeter) would be wrong. ``reachable`` is False to make that explicit.
+        Reuses ``serialize_device`` for the identity fields but blanks volatile
+        live state: a device served later from this snapshot is unreachable, so a
+        stale on/brightness/color reading would be wrong. ``reachable`` is False.
         """
         live = serialize_device(device)
         return live.model_copy(
@@ -506,13 +462,10 @@ class DeviceRegistry:
     def _host_only_snapshot(host: str) -> Device:
         """Fallback identity for a persisted host we've never successfully read.
 
-        With no snapshot there's no MAC and no alias, so we surface the host as
-        both. The id is the host itself: ``stable_device_id`` already falls back to
-        the host when a device reports no MAC, so this is exactly the id a legacy
-        (MAC-less) device would get once read — keeping any room/favorite keyed to
-        it stable. For a SMART device that will ultimately key by MAC it's a
-        best-effort placeholder until the first successful read supplies a
-        snapshot; it's deterministic so repeated frames don't churn the id.
+        No snapshot means no MAC/alias, so surface the host as both. The id is the
+        host — the same id ``stable_device_id`` gives a MAC-less device once read,
+        so a room/favorite keyed to it stays stable. Deterministic, so repeated
+        frames don't churn the id.
         """
         return Device(
             id=host,
@@ -530,17 +483,13 @@ class DeviceRegistry:
     def unreachable_devices(self) -> list[Device]:
         """Known devices that aren't currently live, as ``reachable=False`` entries.
 
-        A persisted host with no cached device (offline, or failed the last
-        discovery) would otherwise disappear from the UI while still occupying
-        rooms and favorites — leaving phantom membership. So for each such host we
-        emit its last-known snapshot (or a host-only placeholder) so it stays
-        visible as a grayed, non-interactive card. Never touches the network, so
-        it's safe to call on every SSE frame.
+        For each persisted host with no cached device, emit its last-known
+        snapshot (or a host-only placeholder) so it stays visible as a grayed card
+        instead of vanishing from rooms/favorites. Never touches the network.
 
-        A device that merely changed IP is live under its stable id at the *new*
-        host while its old IP lingers in the host store; emitting the old host too
-        would fork it into a phantom twin, so entries whose id is already live are
-        skipped.
+        A device that changed IP is live under its stable id at the new host while
+        its old IP lingers in the store; entries whose id is already live are
+        skipped so it isn't forked into a phantom twin.
         """
         if self._store is None:
             return []
@@ -564,10 +513,9 @@ class DeviceRegistry:
     async def attach_cloud(self) -> list[KasaDevice]:
         """Discover and cache devices that are only controllable via the cloud.
 
-        Excludes anything already controlled locally (matched by MAC), so a device
-        reachable both ways isn't listed twice, and resolves each cloud device's
-        LAN IP from its MAC when a known host advertises it, so it shows the same
-        ``host`` as locally-discovered devices. Best-effort: never raises.
+        Excludes anything already controlled locally (matched by MAC) so it isn't
+        listed twice, and resolves each cloud device's LAN IP from its MAC so it
+        shows the same ``host`` as local devices. Best-effort: never raises.
         """
         if self._cloud_client is None:
             return []
@@ -591,12 +539,12 @@ class DeviceRegistry:
         for device in cloud_devices:
             if (ip := mac_to_ip.get(device.mac)) is not None:
                 device.host = ip
-            # Keyed by the same stable id as local devices, so a device that moves
-            # between local and cloud control keeps one identity (and its data).
+            # Same stable id as local devices, so one that moves between local and
+            # cloud control keeps its identity (and data).
             stable_id = stable_device_id(device)
             self._cloud_devices[stable_id] = device
             self._migrate_identity(device.host, stable_id)
-        # State was just read during the attach, so reset the poll throttle.
+        # State was just read during the attach; reset the poll throttle.
         self._last_cloud_refresh = time.monotonic()
         logger.info(f"Attached {len(self._cloud_devices)} cloud device(s)")
         return list(self._cloud_devices.values())
@@ -604,8 +552,8 @@ class DeviceRegistry:
     async def _known_host_ips(self) -> dict[str, str]:
         """Map normalized MAC -> LAN IP for known hosts not controlled locally.
 
-        Discovery (unauthenticated) still reports a device's MAC even when its
-        credentials are rejected, letting us pair a cloud device with its LAN IP.
+        Discovery reports a device's MAC even when its credentials are rejected,
+        letting us pair a cloud device with its LAN IP.
         """
         if self._store is None:
             return {}
@@ -619,7 +567,7 @@ class DeviceRegistry:
                 return
             if mac := getattr(device, "mac", None):
                 result[_norm_mac(mac)] = host
-            # Probed only for its MAC; release its session so it isn't left open.
+            # Probed only for its MAC; release the session.
             await self._safe_disconnect(device)
 
         await asyncio.gather(*(probe(h) for h in unresolved))
@@ -629,9 +577,8 @@ class DeviceRegistry:
         """Nudge the user toward cloud control when it's off but would help.
 
         Logged only when the fallback is disabled and devices answered discovery
-        yet failed local auth — the exact signature of a device (e.g. an HS300)
-        whose firmware dropped local control. No-op when cloud control is already
-        configured.
+        yet failed local auth — the signature of a device (e.g. an HS300) that
+        dropped local control. No-op when cloud control is configured.
         """
         if self._cloud_client is not None or not self._unreadable_hosts:
             return
@@ -646,10 +593,9 @@ class DeviceRegistry:
     async def aclose(self) -> None:
         """Release external resources at shutdown.
 
-        Disconnects every cached device's aiohttp session (otherwise they log
-        "Unclosed client session" during interpreter teardown) and closes the
-        shared cloud HTTP session. Cloud devices share that session, so only the
-        local devices need an individual disconnect.
+        Disconnects each local device's session (else "Unclosed client session" at
+        teardown) and closes the shared cloud HTTP session. Cloud devices share
+        that session, so they need no individual disconnect.
         """
         await asyncio.gather(
             *(self._safe_disconnect(d) for d in self._devices.values())
@@ -686,14 +632,13 @@ class DeviceRegistry:
     async def get_usage(self, device_id: str) -> Usage:
         """Energy-monitoring data for a device: live power plus history.
 
-        Cloud devices supply their own aggregated summary (per-outlet meters
-        rolled up); local devices are read through the python-kasa Energy module.
+        Cloud devices supply their own aggregated summary; local devices are read
+        through the python-kasa Energy module.
         """
         device = self.get(device_id)
 
-        # Cloud devices meter per outlet and expose a ready-made summary. The
-        # Usage is labelled with the stable ``device_id`` the caller looked up by,
-        # so it matches the id under which history is recorded and served.
+        # Cloud devices expose a ready-made per-outlet summary. Labelled with the
+        # looked-up ``device_id`` so it matches the id history is recorded under.
         summary = getattr(device, "energy_summary", None)
         if summary is not None:
             return _build_usage(device_id, rate=self.energy_rate, **await summary())
@@ -735,23 +680,18 @@ class DeviceRegistry:
     async def read_energy_snapshot(self, device_id: str) -> EnergySnapshot:
         """Cheap, scalar-only energy read for the background recorder.
 
-        The recorder persists only live power plus today's/this-month's totals,
-        so — unlike ``get_usage`` — this skips ``get_daily_stats``/
-        ``get_monthly_stats``. Those fetch the device's full daily/monthly
-        history tables (extra device round-trips) that the recorder immediately
-        discards, which is pure waste every cycle. The three scalars here come
-        straight from the Energy module's cached ``update()`` data.
-
-        ``get_usage`` is intentionally left untouched: it still backs ``/usage``,
-        which legitimately needs the history tables.
+        Persists only live power plus today's/this-month's totals, so unlike
+        ``get_usage`` this skips ``get_daily_stats``/``get_monthly_stats`` — the
+        history-table fetches the recorder would discard every cycle. The scalars
+        come from the Energy module's cached ``update()`` data. ``get_usage``
+        stays untouched: it still backs ``/usage``, which needs the tables.
         """
         device = self.get(device_id)
 
-        # Cloud strips (e.g. HS300) meter per outlet and expose only a rolled-up
-        # ``energy_summary()``; there's no cheaper per-strip scalar read. That
-        # summary already batches its fan-out into the minimum round-trips, so
-        # routing through it unchanged keeps the cloud cost identical to what
-        # ``get_usage`` incurred — we simply ignore its history maps here.
+        # Cloud strips expose only a rolled-up ``energy_summary()``; there's no
+        # cheaper per-strip scalar read. It already batches into the minimum
+        # round-trips, so routing through it keeps the cloud cost identical to
+        # ``get_usage`` — we just ignore its history maps here.
         summary = getattr(device, "energy_summary", None)
         if summary is not None:
             data = await summary()
@@ -764,8 +704,7 @@ class DeviceRegistry:
         energy = device.modules.get(Module.Energy)
         if energy is None:
             raise EnergyUnsupportedError(device_id)
-        # A plain refresh populates the Energy module's cached scalars; no
-        # history-table queries are triggered.
+        # A plain refresh populates the cached scalars; no history-table queries.
         await self._refresh(device)
 
         def _safe(name: str) -> float | None:
@@ -786,9 +725,8 @@ class DeviceRegistry:
     ) -> KasaDevice:
         """Toggle one outlet of a strip, matched by its stable child id.
 
-        Matches on the stable id (``stable_child_id``); an alias match is kept as
-        a fallback so ids saved by an older client (which addressed outlets by
-        alias) keep working.
+        Matches on the stable id (``stable_child_id``), with an alias fallback so
+        ids saved by an older client (which addressed outlets by alias) still work.
         """
         device = self.get(device_id)
         for child in device.children:
@@ -801,11 +739,9 @@ class DeviceRegistry:
     async def set_alias(self, device_id: str, alias: str) -> KasaDevice:
         """Rename a device, then refresh so the new alias is reflected.
 
-        Renaming is safe against our stable ids precisely because they key on the
-        MAC/device_id, never the alias (see ``stable_device_id``) — so the id the
-        client used stays valid afterwards. Mirrors the control actions: apply,
-        re-read, and let the route nudge the broadcaster. Cloud-only devices have
-        no ``set_alias``, so they're rejected rather than silently no-op'd.
+        Safe against our stable ids since they key on MAC/device_id, never the
+        alias, so the client's id stays valid. Cloud-only devices have no
+        ``set_alias``, so they're rejected rather than silently no-op'd.
         """
         device = self.get(device_id)
         rename = getattr(device, "set_alias", None)
@@ -820,10 +756,9 @@ class DeviceRegistry:
     ) -> KasaDevice:
         """Rename one outlet of a strip, matched by its stable child id.
 
-        Matches exactly like ``set_child_power`` (stable id, alias fallback for
-        ids saved by an older client). The child's stable id doesn't derive from
-        the alias, so renaming can't change which outlet the id points at. Returns
-        the parent so the whole strip (with the outlet's new name) is serialized.
+        Matches like ``set_child_power`` (stable id, alias fallback). The child id
+        doesn't derive from the alias, so renaming can't change which outlet it
+        points at. Returns the parent so the whole strip is serialized.
         """
         device = self.get(device_id)
         for child in device.children:
@@ -840,9 +775,8 @@ class DeviceRegistry:
 def _cost(kwh: float | None, rate: float | None) -> float | None:
     """Money cost of ``kwh`` at a flat ``rate`` per kWh, rounded to cents.
 
-    A flat-rate APPROXIMATION — it ignores tiered and time-of-use billing.
-    Returns None when either the reading or the rate is absent, so cost fields
-    simply stay null when no KASA_ENERGY_RATE is configured.
+    A flat-rate APPROXIMATION (no tiered/time-of-use billing). None when either
+    the reading or rate is absent, so cost fields stay null with no rate set.
     """
     if kwh is None or rate is None:
         return None
@@ -862,9 +796,8 @@ def _build_usage(
 ) -> Usage:
     """Assemble a Usage response from raw scalar readings and history maps.
 
-    Shared by the local (python-kasa) and cloud energy paths so both label,
-    round, and cost day/month history identically. ``rate`` is the optional
-    flat $/kWh rate; when None, every cost field is null.
+    Shared by the local and cloud energy paths so both label, round, and cost
+    history identically. ``rate`` None => every cost field null.
     """
     daily = [
         UsageStat(label=str(day), kwh=(k := round(kwh, 3)), cost=_cost(k, rate))
@@ -924,10 +857,9 @@ def serialize_device(device: KasaDevice) -> Device:
         brightness=brightness,
         hsv=hsv,
         children=children,
-        # Real python-kasa devices/children expose set_alias; the cloud façade
-        # doesn't — so its absence is exactly "this can't be renamed here". A
-        # strip is uniformly local or cloud, so this one flag also gates its
-        # per-outlet rename in the UI.
+        # python-kasa devices expose set_alias; the cloud façade doesn't, so its
+        # absence means "can't be renamed here". A strip is uniformly local or
+        # cloud, so this flag also gates its per-outlet rename in the UI.
         can_rename=hasattr(device, "set_alias"),
     )
 
@@ -935,8 +867,7 @@ def serialize_device(device: KasaDevice) -> Device:
 def _load_credentials(settings: Settings) -> Credentials | None:
     """Build TP-Link cloud credentials from settings, if provided.
 
-    Newer SMART-protocol devices require these to be discovered or controlled.
-    When unset, returns None so legacy plugs keep working without auth.
+    SMART-protocol devices need these; None when unset so legacy plugs still work.
     """
     if settings.tplink_username and settings.tplink_password:
         return Credentials(settings.tplink_username, settings.tplink_password)
@@ -947,19 +878,16 @@ def _load_credentials(settings: Settings) -> Credentials | None:
     return None
 
 
-# Module-level singleton shared across requests, built from the shared settings.
-# The host store lives at KASA_STATE_FILE (default ./data/known_devices.json) and
-# the numeric knobs (energy rate, cloud poll interval) come parsed and validated
-# from api.config; mount the state path as a volume to keep manually-added
-# devices across container rebuilds.
+# Module-level singleton built from the shared settings. Host store at
+# KASA_STATE_FILE (default ./data/known_devices.json); mount that path as a volume
+# to keep manually-added devices.
 _settings = get_settings()
 _cloud = load_cloud_client(_settings)
 
 registry = DeviceRegistry(
     HostStore(_settings.kasa_state_file),
     _load_credentials(_settings),
-    # Persisted beside the host store; lets known-but-offline devices stay visible
-    # (grayed) instead of vanishing from their rooms/favorites.
+    # Lets known-but-offline devices stay visible (grayed) instead of vanishing.
     snapshot_store=DeviceSnapshotStore(_settings.kasa_snapshot_file),
     cloud_client=_cloud[0] if _cloud else None,
     cloud_models=_cloud[1] if _cloud else (),
@@ -967,8 +895,7 @@ registry = DeviceRegistry(
     energy_rate=_settings.kasa_energy_rate,
     energy_currency=_settings.kasa_energy_currency,
     cloud_poll_interval=_settings.kasa_cloud_poll_interval,
-    # Wired in so the one-time lazy migration of IP-keyed rooms/favorites and
-    # energy history can fire as devices are (re)discovered.
+    # Wired in so the one-time IP-keyed data migration can fire on discovery.
     group_store=groups,
     history_store=history,
 )

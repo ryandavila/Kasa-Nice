@@ -1,24 +1,18 @@
 """Single source of truth for backend configuration.
 
-Every tunable the server reads used to be a scattered ``os.getenv`` call, which
-meant the app only ever saw ``.env`` under Docker Compose (compose injects the
-file via ``env_file``). A bare ``just run`` / ``just api-dev`` started with no
-``TPLINK_USERNAME``/``TPLINK_PASSWORD``, so discovery silently found no
-SMART-protocol devices. Consolidating into a ``pydantic-settings`` model makes
-``.env`` load no matter how the process starts, and gives one typed place to see
-every knob.
+A ``pydantic-settings`` model so ``.env`` loads no matter how the process starts
+(not just under Docker Compose's ``env_file``) — otherwise a bare ``just run``
+has no ``TPLINK_USERNAME``/``TPLINK_PASSWORD`` and discovery silently finds no
+SMART-protocol devices.
 
-Precedence is pydantic-settings' default and intentional: real environment
-variables win over ``.env``. Docker keeps passing the credentials as real env
-vars, so containers behave exactly as before; ``.env`` only fills the gaps for
-local runs.
+Precedence is intentional: real env vars win over ``.env``, so Docker (which
+passes credentials as real env vars) behaves as before and ``.env`` only fills
+gaps for local runs.
 
-Access is via :func:`get_settings`, a lazily-built process-wide singleton —
-lazy so import order (and tests) can influence the environment before the first
-read, cached so every module shares one instance. Tests build their own
-``Settings(_env_file=None)`` (see the loader functions' ``settings`` params and
-the ``conftest`` fixture) so a developer's real repo-root ``.env`` can never
-leak in and skew results.
+Access via :func:`get_settings`, a lazy process-wide singleton — lazy so import
+order and tests can set the environment first, cached so every module shares one
+instance. Tests build their own ``Settings(_env_file=None)`` so a developer's
+repo-root ``.env`` can't leak in.
 """
 
 from pathlib import Path
@@ -30,15 +24,14 @@ from .logging_config import get_logger
 
 logger = get_logger(__name__)
 
-# Cloud RPC identity defaults. These aren't in the README's Configuration table;
-# they mirror what the Kasa/Tapo Android app sends and rarely need changing.
-# Defined here (not in cloud_service) so they can seed the settings fields
-# without a circular import — cloud_service imports them back from this module.
+# Cloud RPC identity defaults: mirror the Kasa/Tapo Android app, rarely changed.
+# Here (not in cloud_service) to seed the settings fields without a circular
+# import — cloud_service imports them back.
 _DEFAULT_APP_TYPE = "Tapo_Android"
 _DEFAULT_APP_VERSION = "2.8.14"
 
-# Fallback values for the numeric knobs, kept as named constants so the
-# warn-and-fall-back validators below and the field defaults agree.
+# Numeric-knob fallbacks as named constants so the validators and field defaults
+# agree.
 _DEFAULT_CLOUD_POLL_INTERVAL = 30.0
 _DEFAULT_ENERGY_SAMPLE_INTERVAL = 300.0
 _MIN_ENERGY_SAMPLE_INTERVAL = 10.0
@@ -48,21 +41,19 @@ _DEFAULT_PORT = 8080
 class Settings(BaseSettings):
     """All backend configuration, loaded from the environment and ``.env``.
 
-    Field names are the lowercase of their environment variable, matched
-    case-insensitively, so ``tplink_username`` reads ``TPLINK_USERNAME`` etc.
-    Names and defaults match the README's Configuration table exactly — nothing
-    here is renamed.
+    Field names are the lowercased env var, matched case-insensitively, so
+    ``tplink_username`` reads ``TPLINK_USERNAME``. Names/defaults match the
+    README's Configuration table.
     """
 
     model_config = SettingsConfigDict(
-        # Load ``.env`` from the current working directory (repo root under both
-        # `just run` and Docker). Real env vars still take precedence.
+        # Load ``.env`` from the CWD (repo root under `just run` and Docker); real
+        # env vars still take precedence.
         env_file=".env",
         env_file_encoding="utf-8",
         # python-dotenv strips matching surrounding quotes, so a single-quoted
         # TPLINK_PASSWORD (required when shell-sourcing .env) arrives unquoted.
-        # Ignore unrelated env vars rather than erroring on them.
-        extra="ignore",
+        extra="ignore",  # ignore unrelated env vars rather than erroring
         case_sensitive=False,
     )
 
@@ -80,14 +71,12 @@ class Settings(BaseSettings):
 
     # ── Persistence paths (mount these as volumes to survive rebuilds) ────────
     kasa_state_file: Path = Path("data/known_devices.json")
-    # Last-known identity of every device that has been read, so a device that
-    # later drops off discovery is still shown (grayed, non-interactive) instead
-    # of vanishing from its rooms/favorites. Sits beside the host store.
+    # Last-known identity of every read device, so one that drops off discovery
+    # stays shown (grayed) instead of vanishing from its rooms/favorites.
     kasa_snapshot_file: Path = Path("data/device_snapshots.json")
     kasa_groups_file: Path = Path("data/groups.json")
     kasa_energy_history_file: Path = Path("data/energy_history.db")
-    # Server-side schedule rules ("at HH:MM on these days, turn X on/off"). Sits
-    # beside the group store; mount it too so timers survive container rebuilds.
+    # Server-side schedule rules ("at HH:MM on these days, turn X on/off").
     kasa_schedules_file: Path = Path("data/schedules.json")
 
     # ── Energy history / cost ────────────────────────────────────────────────
@@ -107,9 +96,8 @@ class Settings(BaseSettings):
     kasa_cloud_terminal_uuid: str | None = None
 
     # ── Test-only seams ──────────────────────────────────────────────────────
-    # Serve in-process fake devices instead of scanning the network, so the
-    # browser end-to-end smoke test can exercise real API wiring with no Kasa
-    # hardware or credentials. Off by default; production startup is untouched.
+    # Serve in-process fake devices instead of scanning, so the browser e2e test
+    # exercises real API wiring with no hardware/credentials. Off by default.
     kasa_fake_devices: bool = False
 
     @property
@@ -118,11 +106,10 @@ class Settings(BaseSettings):
         return tuple(m.strip() for m in self.kasa_cloud_models.split(",") if m.strip())
 
     # ── Validators ───────────────────────────────────────────────────────────
-    # pydantic raises on validation failure by default, but the historical
-    # behaviour for these knobs is to log a warning and fall back to the default
-    # so a typo in a dotenv can't take the server down. ``mode="before"`` lets us
-    # intercept the raw string. Defaults aren't validated, so an *unset* var uses
-    # the field default without hitting these — only a set-but-bad value warns.
+    # These knobs warn and fall back to the default rather than raising, so a
+    # dotenv typo can't take the server down. ``mode="before"`` intercepts the
+    # raw string; an *unset* var uses the field default without hitting these, so
+    # only a set-but-bad value warns.
 
     @field_validator("kasa_energy_rate", mode="before")
     @classmethod
@@ -176,9 +163,8 @@ class Settings(BaseSettings):
     @field_validator("kasa_port", mode="before")
     @classmethod
     def _parse_port(cls, value: object) -> int:
-        # Historically ``int(os.getenv("KASA_PORT"))`` crashed startup on garbage.
-        # For consistency with the other numeric knobs we now warn and fall back
-        # to 8080 rather than raising (a behaviour change, but a safer default).
+        # Warn and fall back to 8080 rather than raising, so garbage can't crash
+        # startup (matches the other numeric knobs).
         if value is None:
             return _DEFAULT_PORT
         text = str(value).strip()
@@ -193,18 +179,16 @@ class Settings(BaseSettings):
     @field_validator("kasa_cloud_fallback", "kasa_fake_devices", mode="before")
     @classmethod
     def _parse_cloud_fallback(cls, value: object) -> bool:
-        # Preserve the exact historical truthy set: only these strings enable the
-        # cloud path; anything else (including garbage) is off, never an error.
-        # pydantic's own bool coercion would raise on unrecognised strings, so we
-        # do the check ourselves.
+        # Only these strings enable the flag; anything else is off, never an error
+        # (pydantic's own bool coercion would raise on unrecognised strings).
         if isinstance(value, bool):
             return value
         return str(value).strip().lower() in ("1", "true", "yes", "on")
 
 
-# Process-wide cache. Built on first use rather than at import so tests (and
-# import order) can set the environment first. ``set_settings``/``reset_settings``
-# are test hooks for overriding it without mutating ``os.environ``.
+# Process-wide cache, built on first use so tests and import order can set the
+# environment first. set_settings/reset_settings override it without touching
+# os.environ.
 _settings: Settings | None = None
 
 

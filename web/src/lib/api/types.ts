@@ -38,10 +38,9 @@ export interface Device {
 	 */
 	can_rename: boolean;
 	/**
-	 * False for a known device that didn't answer discovery: it's rendered as a
-	 * grayed, non-interactive card (from its last-known snapshot, or host-only
-	 * identity) so it doesn't vanish from its rooms/favorites. Live devices are
-	 * always true; the retry affordance flips it back once the device answers.
+	 * False for a known device that didn't answer discovery: rendered as a grayed,
+	 * non-interactive card so it doesn't vanish from rooms/favorites. The retry
+	 * affordance flips it back once the device answers.
 	 */
 	reachable: boolean;
 }

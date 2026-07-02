@@ -1,21 +1,13 @@
 """Server-Sent Events stream of live device state.
 
-Replaces the frontend's fixed-interval polling of ``/state``: the browser opens
-one ``EventSource`` to ``/api/events`` and the server pushes the serialized
-device list whenever hardware is re-read, so changes made elsewhere (the Kasa
-app, a physical switch) surface without the client hammering an endpoint on a
-timer.
+The browser opens one ``EventSource`` to ``/api/events`` and the server pushes
+the serialized device list whenever hardware is re-read, so changes made
+elsewhere (the Kasa app, a physical switch) surface without polling.
 
 A single shared :class:`_Broadcaster` drives ONE ``refresh_all`` loop for the
-whole process and fans each serialized frame out to per-connection queues.
-Previously every connection ran its own loop, so two open tabs polled every
-device twice as often (on top of the energy recorder); now the hardware is read
-once per interval no matter how many clients are attached. The loop runs only
-while at least one client is subscribed, so an idle server never polls hardware
-for nobody.
-
-Kept in its own module with its own ``APIRouter`` so the streaming concern stays
-isolated and ``routes.py`` remains a flat list of plain REST handlers.
+whole process and fans each frame out to per-connection queues, so hardware is
+read once per interval no matter how many clients attach. The loop runs only
+while at least one client is subscribed, so an idle server never polls.
 """
 
 import asyncio
@@ -32,22 +24,19 @@ logger = get_logger(__name__)
 
 router = APIRouter(prefix="/api")
 
-# Seconds between server-side state re-reads pushed to connected clients. Matches
-# the old client poll cadence.
+# Seconds between server-side state re-reads pushed to clients.
 _STREAM_INTERVAL = 5.0
 
-# Sent in place of a data frame when nothing changed (or a refresh failed): keeps
-# the connection and any intermediary proxy alive without re-transmitting an
-# identical device list every interval.
+# Sent instead of a data frame when nothing changed (or a refresh failed): keeps
+# the connection and any proxy alive without re-sending an identical device list.
 _KEEPALIVE = ": keepalive\n\n"
 
 
 def _frame(devices: list) -> str:
     """Encode a device list as one SSE ``data:`` frame.
 
-    Known-but-unreachable devices are appended (as ``reachable=False`` entries)
-    so the stream carries them alongside live devices — the frame stays a flat
-    JSON array the client already merges, just extended, never reshaped.
+    Known-but-unreachable devices are appended (``reachable=False``) so the frame
+    stays a flat JSON array the client already merges, just extended.
     """
     items = [serialize_device(d).model_dump() for d in devices]
     items += [d.model_dump() for d in registry.unreachable_devices()]
@@ -58,18 +47,17 @@ def _frame(devices: list) -> str:
 class _Broadcaster:
     """One shared refresh loop that fans live state out to every subscriber.
 
-    Connections call :meth:`subscribe` to get their own queue and simply await
-    it; the single background loop does all the hardware reads and pushes each
-    frame to every queue. The loop is lazily started on the first subscriber and
-    cancelled when the last one leaves, so no hardware is polled when nobody is
-    watching.
+    Connections :meth:`subscribe` for their own queue and await it; the single
+    background loop does all the reads and pushes each frame to every queue. The
+    loop is lazily started on the first subscriber and cancelled when the last
+    leaves.
     """
 
     def __init__(self) -> None:
         self._subscribers: set[asyncio.Queue[str]] = set()
         self._task: asyncio.Task | None = None
-        # Last data frame fanned out, for change-suppression: an unchanged frame
-        # is replaced by a keepalive so identical device lists aren't re-sent.
+        # Last data frame fanned out; an unchanged frame is replaced by a
+        # keepalive so identical device lists aren't re-sent.
         self._last_frame: str | None = None
 
     def subscribe(self) -> asyncio.Queue[str]:
@@ -86,13 +74,12 @@ class _Broadcaster:
         if not self._subscribers and self._task is not None:
             self._task.cancel()
             self._task = None
-            # A fresh session should start clean rather than suppress against a
-            # frame from a since-departed one.
+            # Fresh session starts clean, not suppressed against a departed one.
             self._last_frame = None
 
     def _fanout(self, item: str) -> None:
-        # Unbounded queues never raise here; each frame is the full state, so a
-        # briefly slow client just receives them back-to-back and catches up.
+        # Unbounded queues never raise; each frame is full state, so a briefly
+        # slow client just catches up back-to-back.
         for queue in self._subscribers:
             queue.put_nowait(item)
 
@@ -108,10 +95,10 @@ class _Broadcaster:
     async def publish_now(self) -> None:
         """Immediately push current cached state to all subscribers.
 
-        Called after a control action so other clients update without waiting for
-        the next tick. The action handler already refreshed the affected device,
-        so this serializes ``registry.all()`` without another hardware read.
-        No-op when nobody is subscribed (the loop isn't running).
+        Called after a control action so other clients update without waiting a
+        tick. The handler already refreshed the affected device, so this
+        serializes ``registry.all()`` without another read. No-op when nobody is
+        subscribed.
         """
         if self._subscribers:
             self._publish(registry.all())
@@ -124,8 +111,7 @@ class _Broadcaster:
                 devices = await registry.refresh_all()
             except Exception as e:  # noqa: BLE001 - a transient read error must not kill the loop
                 logger.debug(f"Event stream refresh failed: {e}")
-                # Keep every connection (and any proxy) alive until the next
-                # successful refresh.
+                # Keep connections alive until the next successful refresh.
                 self._fanout(_KEEPALIVE)
                 continue
             self._publish(devices)
@@ -137,13 +123,11 @@ broadcaster = _Broadcaster()
 async def _stream(request: Request) -> AsyncIterator[str]:
     queue = broadcaster.subscribe()
     try:
-        # Emit cached state immediately so the UI paints without waiting a full
-        # interval for the first hardware re-read. Always sent, regardless of
-        # change-suppression, so a new connection is never left blank.
+        # Emit cached state immediately (bypassing change-suppression) so the UI
+        # paints without waiting for the first re-read and is never left blank.
         yield _frame(registry.all())
-        # Frames (data or keepalive) arrive at least every interval, so
-        # is_disconnected is re-checked promptly; a dropped connection also
-        # cancels this generator, and the finally unsubscribes either way.
+        # Frames arrive at least every interval, so is_disconnected is re-checked
+        # promptly; the finally unsubscribes on drop either way.
         while not await request.is_disconnected():
             yield await queue.get()
     finally:

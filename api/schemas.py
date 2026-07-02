@@ -82,9 +82,8 @@ class Usage(BaseModel):
 class EnergySummary(BaseModel):
     """Whole-home energy totals aggregated across every metered device.
 
-    Each field sums the corresponding per-device reading; a device's null
-    reading counts as zero. Cost fields use the flat rate and stay null when no
-    rate is configured. With no metered devices the totals are simply zero.
+    Each field sums the per-device reading (null counts as zero); cost fields use
+    the flat rate and stay null when unset. No metered devices => zero totals.
     """
 
     total_power_w: float = Field(
@@ -152,8 +151,8 @@ class PowerRequest(BaseModel):
 class PowerResult(BaseModel):
     """Outcome of a fan-out power action across many devices.
 
-    Per-device failures are tolerated, so the batch reports which device ids were
-    switched and which couldn't be (unreachable, or no longer in the registry).
+    Reports which device ids switched and which couldn't (unreachable, or no
+    longer in the registry).
     """
 
     on: bool
@@ -164,10 +163,8 @@ class PowerResult(BaseModel):
 class RenameRequest(BaseModel):
     """A new display name for a device or one strip outlet.
 
-    Trimmed and required non-empty: a blank or whitespace-only alias would leave
-    the device unlabelable in the UI (and the underlying set_alias would persist
-    the emptiness to the hardware). Capped well above any sensible name so it's a
-    guard against unbounded input reaching the device, not a real-world limit.
+    Trimmed and required non-empty (a blank alias would leave the device
+    unlabelable). ``max_length`` guards against unbounded input, not a real limit.
     """
 
     alias: str = Field(min_length=1, max_length=60)
@@ -219,18 +216,16 @@ class Favorites(BaseModel):
 
 # ── Schedules (timers) ────────────────────────────────────────────────────────
 
-# 0=Monday … 6=Sunday, matching Python's ``datetime.weekday()`` so the scheduler
-# can compare a rule's days directly against the local clock with no remapping.
-# The frontend presents a Mon–Sun picker over these same integers.
+# 0=Monday … 6=Sunday, matching ``datetime.weekday()`` so the scheduler compares
+# a rule's days against the local clock with no remapping.
 _HHMM = r"^([01]\d|2[0-3]):[0-5]\d$"
 
 
 def _normalize_days(days: list[int]) -> list[int]:
     """Validate weekday ints and normalise to a sorted, de-duplicated list.
 
-    JSON has no set type, so "set of ints" is persisted as a canonical list. A
-    rule with no days would never fire (almost certainly a mistake), so at least
-    one is required. Shared by the create/read/update schemas so they agree.
+    Persisted as a canonical list (JSON has no set). At least one day is required
+    (a rule with none would never fire). Shared by all schedule schemas.
     """
     if not days:
         raise ValueError("at least one weekday is required")
@@ -242,9 +237,8 @@ def _normalize_days(days: list[int]) -> list[int]:
 class ScheduleTarget(BaseModel):
     """What a rule acts on: a single device, or a whole room (group).
 
-    A discriminated ``{type, id}`` rather than two optional id fields, so adding
-    a future target kind stays a one-line ``Literal`` extension and can't produce
-    an ambiguous "both set / neither set" payload.
+    A discriminated ``{type, id}`` (not two optional id fields), so a future
+    target kind is a one-line ``Literal`` extension with no ambiguous payload.
     """
 
     type: Literal["device", "room"]
@@ -263,12 +257,9 @@ class LastFired(BaseModel):
 class Schedule(BaseModel):
     """A fixed-time rule: at ``time`` on ``days``, apply ``action`` to ``target``.
 
-    The ``kind`` discriminator is fixed to ``"fixed_time"`` in v1. It exists so
-    later rule kinds (sunrise/sunset, one-shot timers) can be added as new
-    ``kind`` values without reshaping — or breaking the deserialization of —
-    existing v1 rules. Likewise ``action`` is a string enum today; a future
-    brightness/colour action would arrive as an additional value, leaving on/off
-    rules untouched.
+    ``kind`` is fixed to ``"fixed_time"`` in v1, left open so later rule kinds
+    (sunrise/sunset, one-shot timers) can be added without breaking existing
+    rules; likewise ``action`` can gain values, leaving on/off rules untouched.
     """
 
     id: str
@@ -280,8 +271,7 @@ class Schedule(BaseModel):
     )
     target: ScheduleTarget
     action: Literal["on", "off"]
-    # Server-written; null until the rule first fires. Optional so older files
-    # (and freshly-created rules) load without it.
+    # Server-written; null until first fired. Optional so older files load.
     last_fired: LastFired | None = None
 
     @field_validator("days")
@@ -318,7 +308,7 @@ class ScheduleUpdate(BaseModel):
     @field_validator("days")
     @classmethod
     def _validate_days(cls, days: list[int] | None) -> list[int] | None:
-        # Same rule as the other schemas, but tolerate the field being omitted.
+        # As the other schemas, but tolerate the field being omitted.
         return None if days is None else _normalize_days(days)
 
 

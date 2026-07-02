@@ -68,10 +68,13 @@ web-test:
 # Run the Playwright end-to-end smoke test against the production-style server.
 # Builds the SPA, starts the API serving it with in-process fake devices (no
 # hardware/credentials needed), waits for it, runs the test, and always tears the
-# server down. Run `cd web && bunx playwright install chromium` once beforehand.
+# server down.
 e2e: web-build
     #!/usr/bin/env bash
     set -euo pipefail
+    # Idempotent: downloads Chromium on first run, near-instant no-op after. Done
+    # before the server starts so a slow first download isn't holding a server.
+    (cd web && bunx playwright install chromium)
     # An uncommon port so we don't collide with (and silently test against) a real
     # Kasa-Nice instance a developer may have running on the usual 8080.
     port=8199

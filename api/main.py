@@ -2,6 +2,7 @@ import asyncio
 import contextlib
 import os
 from contextlib import asynccontextmanager
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -15,6 +16,11 @@ from .logging_config import get_logger, setup_logging
 from .routes import router
 
 logger = get_logger(__name__)
+
+try:
+    __version__ = version("kasa-nice")
+except PackageNotFoundError:  # not installed (e.g. running from a bare checkout)
+    __version__ = "0.0.0"
 
 # Built SvelteKit SPA (web/build). Present in production images; absent in dev,
 # where the frontend is served by the Vite dev server instead.
@@ -56,7 +62,7 @@ def _mount_spa(app: FastAPI) -> None:
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="Kasa-Nice API", version="1.1.0", lifespan=lifespan)
+    app = FastAPI(title="Kasa-Nice API", version=__version__, lifespan=lifespan)
 
     # Allow the Vite dev server origin so the frontend can run standalone in dev.
     app.add_middleware(

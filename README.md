@@ -49,7 +49,7 @@ docker compose up -d
 git clone https://github.com/ryandavila/Kasa-Nice.git
 cd Kasa-Nice
 uv sync
-make run          # builds the frontend, then serves it from the API at :8080
+just run          # builds the frontend, then serves it from the API at :8080
 ```
 
 ## API
@@ -160,6 +160,7 @@ device list survive rebuilds.
 - Python 3.14+
 - [uv](https://docs.astral.sh/uv/) (Python dependency management)
 - [bun](https://bun.sh/) (frontend)
+- [just](https://just.systems) (task runner — run `just` to list recipes)
 - Docker (optional)
 
 ### Local development
@@ -168,20 +169,25 @@ The Vite dev server proxies `/api` to the backend, so the frontend always
 fetches relative paths in both dev and production.
 
 ```bash
-make setup     # one-time: install Python + frontend deps
+just setup     # one-time: install Python + frontend deps
 
-make api-dev   # Terminal 1 — FastAPI with autoreload (http://localhost:8080)
-make web-dev   # Terminal 2 — SvelteKit dev server (http://localhost:5173)
+just api-dev   # Terminal 1 — FastAPI with autoreload (http://localhost:8080)
+just web-dev   # Terminal 2 — SvelteKit dev server (http://localhost:5173)
 ```
 
 ### Quality checks
 
 ```bash
-make test         # backend tests (pytest)
-make lint         # ruff (Python)
-make web-lint     # prettier + eslint (frontend)
-make check        # svelte-check (types + a11y)
+just test         # backend tests (pytest)
+just web-test     # frontend unit tests (vitest)
+just lint         # lint & autofix Python (ruff) + frontend (prettier + eslint)
+just typecheck    # svelte-check (types + a11y)
+just format       # apply ruff + prettier formatting
 ```
+
+`just fix` runs format, lint, typecheck, and all tests in one go, while
+`just ci` runs the same checks in read-only mode (no file mutations) — the
+exact suite CI enforces.
 
 ## Testing
 
@@ -190,7 +196,7 @@ devices or network: color helpers, serialization, energy data, host
 persistence, and every REST route (including error paths).
 
 ```bash
-make test     # or: uv run pytest
+just test     # or: uv run pytest
 ```
 
 ## Supported Devices
@@ -224,7 +230,7 @@ Structured logging to the console and to `./logs/kasa_nice.log`, with rotation
 1. Fork the repository
 2. Create a feature branch
 3. Make your changes and add tests where applicable
-4. Run `make test`, `make lint`, and `make web-lint`
+4. Run `just ci` (or `just fix` to auto-format and fix as it goes)
 5. Submit a pull request
 
 ## License

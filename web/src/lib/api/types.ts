@@ -199,3 +199,56 @@ export interface EnergyHistory {
 	samples: EnergySample[];
 	daily: DailyEnergy[];
 }
+
+// ── Energy insights ─────────────────────────────────────────────────────────
+
+/**
+ * Month-to-date energy plus a naive linear month-end projection (MTD daily
+ * average extrapolated across every day of the month — a forecast, not a bill).
+ */
+export interface MonthProjection {
+	/** Whole-home energy used so far this calendar month, in kWh. */
+	month_to_date_kwh: number;
+	/** Extrapolated whole-home energy for the full month, in kWh. */
+	projected_kwh: number;
+	/** MTD kWh × flat rate; null when no rate is configured. */
+	month_to_date_cost: number | null;
+	/** Projected kWh × flat rate; null when no rate is configured. */
+	projected_cost: number | null;
+}
+
+/** Today/month energy rolled up over one room (or the "unassigned" bucket). */
+export interface RoomUsage {
+	/** Group id, or the synthetic "unassigned" for room-less devices. */
+	group_id: string;
+	name: string;
+	today_kwh: number;
+	month_kwh: number;
+	today_cost: number | null;
+	month_cost: number | null;
+}
+
+/** Whole-home kWh for the current ISO week vs the previous full week. */
+export interface WeekComparison {
+	this_week_kwh: number;
+	last_week_kwh: number;
+}
+
+/** A device's overnight (01:00–05:00 local) median standing power draw. */
+export interface IdleDevice {
+	device_id: string;
+	/** Live alias when the device is still known; otherwise its id. */
+	alias: string;
+	/** Median overnight power draw, in watts. */
+	idle_w: number;
+	/** True when the idle draw exceeds the vampire-load threshold. */
+	is_idle_hog: boolean;
+}
+
+/** Derived energy insights across all recorded devices. */
+export interface EnergyInsights {
+	projection: MonthProjection;
+	rooms: RoomUsage[];
+	week: WeekComparison;
+	idle: IdleDevice[];
+}

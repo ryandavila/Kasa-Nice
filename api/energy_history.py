@@ -110,6 +110,113 @@ class EnergyHistoryStore:
             return []
         return [(day, float(kwh)) for day, kwh in rows]
 
+    # ── Insights aggregation ─────────────────────────────────────────────────
+    # Queries backing GET /api/energy/insights. Each opens its own connection,
+    # returns an empty result on any SQLite error (best-effort, like the rest of
+    # the store), and buckets by LOCAL date/time — ``today_kwh`` resets at local
+    # midnight, so all date math must agree with the device's own day boundary.
+
+    def today_kwh_by_device(self) -> dict[str, float]:
+        """Energy used so far today per device (kWh), keyed by device id.
+
+        A day's energy is the max ``today_kwh`` seen on the local current date
+        (the reading just before the midnight reset); ``date('now','localtime')``
+        pins "today" to the same local day the device resets on. Devices with no
+        reading today are absent.
+        """
+        try:
+            with self._connect() as conn:
+                rows = conn.execute(
+                    "SELECT device_id, MAX(today_kwh) FROM samples "
+                    "WHERE today_kwh IS NOT NULL "
+                    "AND date(ts, 'unixepoch', 'localtime') = date('now', 'localtime') "
+                    "GROUP BY device_id"
+                ).fetchall()
+        except sqlite3.Error as e:
+            logger.warning(f"Could not read today's energy by device: {e}")
+            return {}
+        return {device_id: float(kwh) for device_id, kwh in rows}
+
+    def month_kwh_by_device(self) -> dict[str, float]:
+        """Energy this calendar month per device (kWh), keyed by device id.
+
+        Sums each device's per-local-day totals (max ``today_kwh`` per day) over
+        the days whose local month matches the current one. Summing daily maxima
+        — rather than trusting the device's own ``month_kwh`` — keeps the figure
+        consistent with the daily/week views and survives a device forgetting its
+        month total. Devices with no reading this month are absent.
+        """
+        try:
+            with self._connect() as conn:
+                rows = conn.execute(
+                    "SELECT device_id, SUM(day_max) FROM ("
+                    "  SELECT device_id, MAX(today_kwh) AS day_max FROM samples"
+                    "  WHERE today_kwh IS NOT NULL"
+                    "    AND strftime('%Y-%m', ts, 'unixepoch', 'localtime')"
+                    "      = strftime('%Y-%m', 'now', 'localtime')"
+                    "  GROUP BY device_id, date(ts, 'unixepoch', 'localtime')"
+                    ") GROUP BY device_id"
+                ).fetchall()
+        except sqlite3.Error as e:
+            logger.warning(f"Could not read this month's energy by device: {e}")
+            return {}
+        return {device_id: float(kwh) for device_id, kwh in rows}
+
+    def home_kwh_between(self, start_ts: int, end_ts: int) -> float:
+        """Whole-home kWh recorded in the half-open window ``[start_ts, end_ts)``.
+
+        Sums every device's per-local-day energy (daily max of ``today_kwh``)
+        across each day in the window. The caller passes local-midnight bounds;
+        used for week-over-week totals where those bounds are consecutive Mondays.
+        """
+        try:
+            with self._connect() as conn:
+                (total,) = conn.execute(
+                    "SELECT COALESCE(SUM(day_max), 0) FROM ("
+                    "  SELECT MAX(today_kwh) AS day_max FROM samples"
+                    "  WHERE ts >= ? AND ts < ? AND today_kwh IS NOT NULL"
+                    "  GROUP BY device_id, date(ts, 'unixepoch', 'localtime')"
+                    ")",
+                    (start_ts, end_ts),
+                ).fetchone()
+        except sqlite3.Error as e:
+            logger.warning(f"Could not sum home energy for {start_ts}-{end_ts}: {e}")
+            return 0.0
+        return float(total or 0.0)
+
+    def idle_draw(self, days: int = 14) -> dict[str, float]:
+        """Median overnight power draw per device (watts), keyed by device id.
+
+        Looks at samples between 01:00 and 05:00 local time — deep night, when
+        nothing should be in active use — over the last ``days`` days, so a high
+        value flags a device burning power while idle (a "vampire" load). Uses the
+        median, not the mean, so an occasional spike (e.g. a fridge compressor
+        cycling on) doesn't inflate the reading. Median is computed in SQL: a
+        window function ranks each device's readings by power, then the middle row
+        (or the mean of the middle two, for an even count) is averaged out.
+        """
+        cutoff = int(time.time()) - days * 86400
+        try:
+            with self._connect() as conn:
+                rows = conn.execute(
+                    "SELECT device_id, AVG(power_w) FROM ("
+                    "  SELECT device_id, power_w,"
+                    "    ROW_NUMBER() OVER ("
+                    "      PARTITION BY device_id ORDER BY power_w) AS rn,"
+                    "    COUNT(*) OVER (PARTITION BY device_id) AS cnt"
+                    "  FROM samples"
+                    "  WHERE ts >= ? AND power_w IS NOT NULL"
+                    "    AND time(ts, 'unixepoch', 'localtime') >= '01:00:00'"
+                    "    AND time(ts, 'unixepoch', 'localtime') < '05:00:00'"
+                    ") WHERE rn IN ((cnt + 1) / 2, (cnt + 2) / 2) "
+                    "GROUP BY device_id",
+                    (cutoff,),
+                ).fetchall()
+        except sqlite3.Error as e:
+            logger.warning(f"Could not compute idle draw: {e}")
+            return {}
+        return {device_id: float(median) for device_id, median in rows}
+
     def migrate_device_id(self, old_id: str, new_id: str) -> None:
         """Re-point samples recorded under ``old_id`` to ``new_id``.
 

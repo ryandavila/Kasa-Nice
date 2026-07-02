@@ -71,6 +71,7 @@ All endpoints are under `/api`; interactive docs live at `http://localhost:8080/
 | `GET`  | `/api/devices/{id}/usage` | Energy data (live power + daily/monthly history) |
 | `GET`  | `/api/devices/{id}/history` | Recorded history: recent power samples + persisted daily totals |
 | `GET`  | `/api/energy/summary` | Whole-home energy totals across all metered devices (`{total_power_w, today_kwh, month_kwh, today_cost, month_cost, device_count}`) |
+| `GET`  | `/api/energy/insights` | Derived insights over recorded history (`{projection, rooms, week, idle}`): month-end projection, per-room rollups, week-over-week delta, and overnight idle draw |
 | `GET`  | `/api/events` | Live device-state stream (Server-Sent Events) |
 | `GET` / `POST` | `/api/groups` | List rooms / create a room (`{"name": "..."}`) |
 | `PATCH` / `DELETE` | `/api/groups/{id}` | Rename or set a room's devices / delete it |

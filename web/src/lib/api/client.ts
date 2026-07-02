@@ -1,6 +1,7 @@
 import type {
 	Device,
 	EnergyHistory,
+	EnergyInsights,
 	EnergySummary,
 	Favorites,
 	Group,
@@ -101,6 +102,9 @@ export const getUsage = (id: string) => request<Usage>(`/devices/${encodeURIComp
 
 /** Whole-home energy totals aggregated across all metered devices. */
 export const getEnergySummary = () => request<EnergySummary>('/energy/summary');
+
+/** Derived energy insights: month projection, room rollups, week delta, idle draw. */
+export const getEnergyInsights = () => request<EnergyInsights>('/energy/insights');
 
 export const setChildPower = (id: string, childId: string, on: boolean) =>
 	post<Device>(`/devices/${encodeURIComponent(id)}/children/${encodeURIComponent(childId)}/power`, {

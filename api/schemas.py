@@ -336,3 +336,84 @@ class EnergyHistory(BaseModel):
     device_id: str
     samples: list[EnergySample] = Field(default_factory=list)
     daily: list[DailyEnergy] = Field(default_factory=list)
+
+
+# ── Energy insights ─────────────────────────────────────────────────────────
+# Derived views over the recorded samples (see GET /api/energy/insights):
+# a month-end projection, per-room rollups, a week-over-week delta, and idle draw.
+
+
+class MonthProjection(BaseModel):
+    """Month-to-date energy plus a naive linear month-end projection.
+
+    The projection extrapolates the month-to-date daily average across every day
+    of the month (``month_to_date / days_elapsed × days_in_month``): a rough
+    forecast, not a bill — it assumes the rest of the month looks like so far.
+    """
+
+    month_to_date_kwh: float = Field(
+        description="Whole-home energy used so far this calendar month, in kWh."
+    )
+    projected_kwh: float = Field(
+        description="Extrapolated whole-home energy for the full month, in kWh."
+    )
+    month_to_date_cost: float | None = Field(
+        default=None, description="MTD kWh × flat rate, or null when no rate is set."
+    )
+    projected_cost: float | None = Field(
+        default=None,
+        description="Projected kWh × flat rate, or null when no rate is set.",
+    )
+
+
+class RoomUsage(BaseModel):
+    """Today/month energy rolled up over the devices in one room.
+
+    Sums per-device usage across a room's members. The synthetic ``group_id``
+    ``"unassigned"`` collects metered devices that belong to no room.
+    """
+
+    group_id: str
+    name: str
+    today_kwh: float
+    month_kwh: float
+    today_cost: float | None = None
+    month_cost: float | None = None
+
+
+class WeekComparison(BaseModel):
+    """Whole-home kWh for the current ISO week vs the previous full week.
+
+    Weeks start Monday, local time. The UI derives the delta; both raw totals are
+    surfaced so it can show either an absolute or a percentage change.
+    """
+
+    this_week_kwh: float
+    last_week_kwh: float
+
+
+class IdleDevice(BaseModel):
+    """A device's overnight (01:00–05:00 local) median standing power draw."""
+
+    device_id: str
+    alias: str = Field(
+        description="Live alias when the device is still known; else its id."
+    )
+    idle_w: float = Field(description="Median overnight power draw, in watts.")
+    is_idle_hog: bool = Field(
+        description="True when the idle draw exceeds the vampire-load threshold."
+    )
+
+
+class EnergyInsights(BaseModel):
+    """Derived energy insights across all recorded devices.
+
+    Assembled from ``EnergyHistoryStore`` aggregates plus room membership; costs
+    use the flat rate and stay null when it is unset. Empty history => zero totals
+    and empty lists (never a 404).
+    """
+
+    projection: MonthProjection
+    rooms: list[RoomUsage] = Field(default_factory=list)
+    week: WeekComparison
+    idle: list[IdleDevice] = Field(default_factory=list)

@@ -1,4 +1,6 @@
 import asyncio
+import calendar
+import datetime
 import time
 
 from fastapi import APIRouter, HTTPException
@@ -25,15 +27,19 @@ from .schemas import (
     Device,
     DiscoverRequest,
     EnergyHistory,
+    EnergyInsights,
     EnergySample,
     EnergySummary,
     Favorites,
     Group,
     GroupCreate,
     GroupUpdate,
+    IdleDevice,
+    MonthProjection,
     PowerRequest,
     PowerResult,
     RenameRequest,
+    RoomUsage,
     Schedule,
     ScheduleCreate,
     ScheduleUpdate,
@@ -41,6 +47,7 @@ from .schemas import (
     ServerStatus,
     SubnetScanRequest,
     Usage,
+    WeekComparison,
 )
 
 router = APIRouter(prefix="/api")
@@ -310,6 +317,127 @@ async def device_history(
             for d, k in daily
         ],
     )
+
+
+# ── Energy insights ─────────────────────────────────────────────────────────
+
+# Median overnight draw above this (watts) marks a device as a "vampire" load
+# worth flagging — roughly the standby of a small always-on appliance.
+_IDLE_HOG_THRESHOLD_W = 2.0
+# Window for the idle-draw median: long enough to smooth nightly variation, short
+# enough to reflect the current setup rather than months-old behaviour.
+_IDLE_WINDOW_DAYS = 14
+
+
+def _local_midnight_ts(d: datetime.date) -> int:
+    """Epoch seconds at local midnight on ``d`` (DST-correct via ``mktime``)."""
+    return int(time.mktime((d.year, d.month, d.day, 0, 0, 0, 0, 0, -1)))
+
+
+@router.get("/energy/insights", response_model=EnergyInsights)
+async def energy_insights() -> EnergyInsights:
+    """Derived energy insights over the recorded sample history.
+
+    Pure aggregation over the ``samples`` table (no device I/O), so it works for
+    devices no longer present. Assembles four views — a naive month-end
+    projection, per-room today/month rollups (with an "Unassigned" bucket for
+    room-less devices), a week-over-week whole-home delta, and per-device idle
+    draw. Costs use the flat rate and stay null when unset; empty history yields
+    zeros and empty lists, never a 404.
+    """
+    rate = registry.energy_rate
+
+    # Month-end projection: extrapolate the month-to-date daily average across the
+    # whole calendar month. Local day-of-month is the number of days elapsed.
+    month_by_device = history.month_kwh_by_device()
+    today_by_device = history.today_kwh_by_device()
+    month_to_date = round(sum(month_by_device.values()), 3)
+    today = datetime.date.today()
+    days_in_month = calendar.monthrange(today.year, today.month)[1]
+    projected = (
+        round(month_to_date / today.day * days_in_month, 3) if today.day else 0.0
+    )
+    projection = MonthProjection(
+        month_to_date_kwh=month_to_date,
+        projected_kwh=projected,
+        month_to_date_cost=_cost(month_to_date, rate),
+        projected_cost=_cost(projected, rate),
+    )
+
+    # Per-room rollups. Track which devices land in a room so the leftovers can be
+    # gathered under a synthetic "Unassigned" bucket.
+    rooms: list[RoomUsage] = []
+    assigned: set[str] = set()
+    for group in groups.list_groups():
+        ids = group["device_ids"]
+        assigned.update(ids)
+        today_kwh = round(sum(today_by_device.get(i, 0.0) for i in ids), 3)
+        month_kwh = round(sum(month_by_device.get(i, 0.0) for i in ids), 3)
+        rooms.append(
+            RoomUsage(
+                group_id=group["id"],
+                name=group["name"],
+                today_kwh=today_kwh,
+                month_kwh=month_kwh,
+                today_cost=_cost(today_kwh, rate),
+                month_cost=_cost(month_kwh, rate),
+            )
+        )
+    # Metered devices in no room: surface their usage rather than hide it, but only
+    # when there's something to show.
+    unassigned_ids = (set(today_by_device) | set(month_by_device)) - assigned
+    if unassigned_ids:
+        u_today = round(sum(today_by_device.get(i, 0.0) for i in unassigned_ids), 3)
+        u_month = round(sum(month_by_device.get(i, 0.0) for i in unassigned_ids), 3)
+        if u_today or u_month:
+            rooms.append(
+                RoomUsage(
+                    group_id="unassigned",
+                    name="Unassigned",
+                    today_kwh=u_today,
+                    month_kwh=u_month,
+                    today_cost=_cost(u_today, rate),
+                    month_cost=_cost(u_month, rate),
+                )
+            )
+
+    # Week-over-week: ISO weeks (Monday start) in local time.
+    this_monday = today - datetime.timedelta(days=today.weekday())
+    last_monday = this_monday - datetime.timedelta(days=7)
+    next_monday = this_monday + datetime.timedelta(days=7)
+    week = WeekComparison(
+        this_week_kwh=round(
+            history.home_kwh_between(
+                _local_midnight_ts(this_monday), _local_midnight_ts(next_monday)
+            ),
+            3,
+        ),
+        last_week_kwh=round(
+            history.home_kwh_between(
+                _local_midnight_ts(last_monday), _local_midnight_ts(this_monday)
+            ),
+            3,
+        ),
+    )
+
+    # Idle draw: label with the live alias where the device is still known, else
+    # fall back to its id (samples outlive a device's presence in the registry).
+    aliases = {stable_device_id(d): (d.alias or d.host) for d in registry.all()}
+    idle = [
+        IdleDevice(
+            device_id=device_id,
+            alias=aliases.get(device_id, device_id),
+            idle_w=round(idle_w, 1),
+            is_idle_hog=idle_w > _IDLE_HOG_THRESHOLD_W,
+        )
+        for device_id, idle_w in sorted(
+            history.idle_draw(_IDLE_WINDOW_DAYS).items(),
+            key=lambda kv: kv[1],
+            reverse=True,
+        )
+    ]
+
+    return EnergyInsights(projection=projection, rooms=rooms, week=week, idle=idle)
 
 
 # ── Groups (rooms) & favorites ──────────────────────────────────────────────

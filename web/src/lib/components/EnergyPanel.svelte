@@ -5,6 +5,7 @@
 	import { deviceStore } from '$lib/stores/devices.svelte';
 	import Icon from './Icon.svelte';
 	import EnergyChart from './EnergyChart.svelte';
+	import EnergyInsights from './EnergyInsights.svelte';
 	import PowerSparkline from './PowerSparkline.svelte';
 
 	const meters = $derived(deviceStore.devices.filter((d) => d.has_emeter));
@@ -136,6 +137,7 @@
 				</dl>
 			</section>
 		{/if}
+		<EnergyInsights {energyRate} {currency} />
 		{#each meters as device (device.id)}
 			{@const u = usage[device.id]}
 			<section class="rounded-card border border-line bg-surface/70 p-5 sm:p-6">

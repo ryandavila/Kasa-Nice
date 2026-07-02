@@ -25,6 +25,16 @@ def _local_noon(d: datetime.date) -> int:
     return int(time.mktime((d.year, d.month, d.day, 12, 0, 0, 0, 0, -1)))
 
 
+def _local_midnight(d: datetime.date) -> int:
+    """Epoch seconds at local midnight on ``d`` (a local-day boundary)."""
+    return int(time.mktime((d.year, d.month, d.day, 0, 0, 0, 0, 0, -1)))
+
+
+def _local_hour(d: datetime.date, hour: int) -> int:
+    """Epoch seconds at local ``hour`` on ``d`` — for time-of-day (idle) buckets."""
+    return int(time.mktime((d.year, d.month, d.day, hour, 0, 0, 0, 0, -1)))
+
+
 # ── Store ───────────────────────────────────────────────────────────────────
 
 
@@ -75,6 +85,82 @@ def test_migrate_device_id_repoints_samples(store):
     # History follows the device to its stable id; nothing left under the old IP.
     assert store.recent_samples("AABBCCDDEE01", 0) == [(now - 100, 5.0)]
     assert store.recent_samples("10.0.0.4", 0) == []
+
+
+# ── Insights aggregation ─────────────────────────────────────────────────────
+
+
+def test_today_kwh_by_device_takes_todays_max(store):
+    today = datetime.date.today()
+    yesterday = today - datetime.timedelta(days=1)
+    # Two readings today: the later, higher one is today's total. A second device
+    # and a prior day confirm grouping and the date filter.
+    store.record("dev-a", 5.0, 0.2, 1.0, ts=_local_noon(today))
+    store.record("dev-a", 5.0, 0.7, 1.0, ts=_local_noon(today) + 3600)
+    store.record("dev-b", 5.0, 0.3, 1.0, ts=_local_noon(today))
+    store.record("dev-a", 5.0, 9.9, 1.0, ts=_local_noon(yesterday))  # excluded
+    assert store.today_kwh_by_device() == {"dev-a": 0.7, "dev-b": 0.3}
+
+
+def test_today_kwh_by_device_empty_when_no_data(store):
+    assert store.today_kwh_by_device() == {}
+
+
+def test_month_kwh_by_device_sums_daily_maxima(store):
+    today = datetime.date.today()
+    first = today.replace(day=1)
+    second = first + datetime.timedelta(days=1)  # always in the same month
+    prev_month = first - datetime.timedelta(days=1)  # last day of previous month
+    # Day 1 total is its max (0.6); day 2 adds 0.5 => 1.1 for the month.
+    store.record("dev-a", 5.0, 0.4, 2.0, ts=_local_noon(first))
+    store.record("dev-a", 5.0, 0.6, 2.0, ts=_local_noon(first) + 3600)
+    store.record("dev-a", 5.0, 0.5, 2.0, ts=_local_noon(second))
+    store.record("dev-a", 5.0, 9.9, 2.0, ts=_local_noon(prev_month))  # other month
+    assert store.month_kwh_by_device()["dev-a"] == pytest.approx(1.1)
+
+
+def test_home_kwh_between_sums_devices_and_days(store):
+    day0 = datetime.date(2024, 6, 3)
+    day1 = datetime.date(2024, 6, 4)
+    before = datetime.date(2024, 6, 2)
+    # dev-a spans two days (0.5 + 0.7), dev-b adds 0.2; a day before the window is
+    # excluded by the half-open bound.
+    store.record("dev-a", 5.0, 0.5, 1.0, ts=_local_noon(day0))
+    store.record("dev-a", 5.0, 0.7, 1.0, ts=_local_noon(day1))
+    store.record("dev-b", 5.0, 0.2, 1.0, ts=_local_noon(day0))
+    store.record("dev-a", 5.0, 9.9, 1.0, ts=_local_noon(before))  # excluded
+    start = _local_midnight(day0)
+    end = _local_midnight(day0 + datetime.timedelta(days=7))
+    assert store.home_kwh_between(start, end) == pytest.approx(1.4)
+
+
+def test_home_kwh_between_empty_window_is_zero(store):
+    assert store.home_kwh_between(0, 1) == 0.0
+
+
+def test_idle_draw_medians_overnight_window_only(store):
+    day = datetime.date.today() - datetime.timedelta(days=1)  # inside the 14d window
+    # Overnight (01:00–05:00) readings 1/3/5 -> median 3; a daytime spike is
+    # ignored so it can't skew the standing-draw figure.
+    store.record("dev-a", 1.0, None, None, ts=_local_hour(day, 2))
+    store.record("dev-a", 3.0, None, None, ts=_local_hour(day, 3))
+    store.record("dev-a", 5.0, None, None, ts=_local_hour(day, 4))
+    store.record("dev-a", 99.0, None, None, ts=_local_hour(day, 14))
+    assert store.idle_draw(days=14) == {"dev-a": pytest.approx(3.0)}
+
+
+def test_idle_draw_even_count_averages_middle_two(store):
+    day = datetime.date.today() - datetime.timedelta(days=1)
+    store.record("dev-a", 1.0, None, None, ts=_local_hour(day, 2))
+    store.record("dev-a", 3.0, None, None, ts=_local_hour(day, 3))
+    # Median of [1, 3] is the mean of the two middle rows = 2.
+    assert store.idle_draw(days=14) == {"dev-a": pytest.approx(2.0)}
+
+
+def test_idle_draw_excludes_samples_outside_window(store):
+    old = datetime.date.today() - datetime.timedelta(days=20)  # beyond 14 days
+    store.record("dev-a", 5.0, None, None, ts=_local_hour(old, 3))
+    assert store.idle_draw(days=14) == {}
 
 
 # ── Recorder ────────────────────────────────────────────────────────────────

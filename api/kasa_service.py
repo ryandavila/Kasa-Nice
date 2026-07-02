@@ -8,7 +8,7 @@ import asyncio
 import ipaddress
 import time
 from colorsys import hsv_to_rgb, rgb_to_hsv
-from typing import Any
+from typing import Any, NamedTuple
 
 from kasa import Credentials, Discover, Module
 from kasa import Device as KasaDevice
@@ -103,6 +103,20 @@ def stable_child_id(child: Any) -> str:
     """
     cid = getattr(child, "device_id", None) or getattr(child, "child_id", None)
     return cid or child.alias
+
+
+class EnergySnapshot(NamedTuple):
+    """The three live scalars the background energy recorder persists.
+
+    Deliberately just what ``EnergyHistoryStore.record`` stores — no history
+    tables — so ``read_energy_snapshot`` can skip the per-device stats fetches
+    that ``get_usage`` needs for the ``/usage`` endpoint but the recorder throws
+    away every cycle.
+    """
+
+    power_w: float | None
+    today_kwh: float | None
+    month_kwh: float | None
 
 
 class DeviceRegistry:
@@ -716,6 +730,55 @@ class DeviceRegistry:
             daily_raw=daily_raw,
             monthly_raw=monthly_raw,
             rate=self.energy_rate,
+        )
+
+    async def read_energy_snapshot(self, device_id: str) -> EnergySnapshot:
+        """Cheap, scalar-only energy read for the background recorder.
+
+        The recorder persists only live power plus today's/this-month's totals,
+        so — unlike ``get_usage`` — this skips ``get_daily_stats``/
+        ``get_monthly_stats``. Those fetch the device's full daily/monthly
+        history tables (extra device round-trips) that the recorder immediately
+        discards, which is pure waste every cycle. The three scalars here come
+        straight from the Energy module's cached ``update()`` data.
+
+        ``get_usage`` is intentionally left untouched: it still backs ``/usage``,
+        which legitimately needs the history tables.
+        """
+        device = self.get(device_id)
+
+        # Cloud strips (e.g. HS300) meter per outlet and expose only a rolled-up
+        # ``energy_summary()``; there's no cheaper per-strip scalar read. That
+        # summary already batches its fan-out into the minimum round-trips, so
+        # routing through it unchanged keeps the cloud cost identical to what
+        # ``get_usage`` incurred — we simply ignore its history maps here.
+        summary = getattr(device, "energy_summary", None)
+        if summary is not None:
+            data = await summary()
+            return EnergySnapshot(
+                power_w=data.get("current_power_w"),
+                today_kwh=data.get("today_kwh"),
+                month_kwh=data.get("month_kwh"),
+            )
+
+        energy = device.modules.get(Module.Energy)
+        if energy is None:
+            raise EnergyUnsupportedError(device_id)
+        # A plain refresh populates the Energy module's cached scalars; no
+        # history-table queries are triggered.
+        await self._refresh(device)
+
+        def _safe(name: str) -> float | None:
+            try:
+                value = getattr(energy, name)
+            except Exception:  # noqa: BLE001 - a missing reading shouldn't stop the cycle
+                return None
+            return float(value) if value is not None else None
+
+        return EnergySnapshot(
+            power_w=_safe("current_consumption"),
+            today_kwh=_safe("consumption_today"),
+            month_kwh=_safe("consumption_this_month"),
         )
 
     async def set_child_power(

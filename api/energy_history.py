@@ -162,7 +162,11 @@ async def run_recorder(registry, store: EnergyHistoryStore, interval: float) -> 
                 # survives a DHCP change and lines up with the ids the API serves.
                 device_id = stable_device_id(device)
                 try:
-                    usage = await registry.get_usage(device_id)
+                    # Snapshot, not get_usage: the recorder stores only these
+                    # three scalars, so it skips the daily/monthly stats-table
+                    # fetches get_usage does — avoiding wasted device I/O every
+                    # cycle (get_usage still backs the /usage endpoint).
+                    snapshot = await registry.read_energy_snapshot(device_id)
                 except EnergyUnsupportedError:
                     continue  # no energy meter; nothing to record
                 except Exception as e:  # noqa: BLE001 - one bad device shouldn't stop the cycle
@@ -170,9 +174,9 @@ async def run_recorder(registry, store: EnergyHistoryStore, interval: float) -> 
                     continue
                 store.record(
                     device_id,
-                    usage.current_power_w,
-                    usage.today_kwh,
-                    usage.month_kwh,
+                    snapshot.power_w,
+                    snapshot.today_kwh,
+                    snapshot.month_kwh,
                 )
             store.prune(int(time.time()) - _RETENTION_SECONDS)
         except asyncio.CancelledError:

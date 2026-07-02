@@ -8,11 +8,11 @@ import pytest
 from conftest import FakeDevice
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from kasa import Module
 
 from api import routes
 from api.energy_history import EnergyHistoryStore, run_recorder
-from api.kasa_service import DeviceRegistry, EnergyUnsupportedError
-from api.schemas import Usage
+from api.kasa_service import DeviceRegistry, EnergySnapshot, EnergyUnsupportedError
 
 
 @pytest.fixture
@@ -88,14 +88,9 @@ def test_recorder_records_only_metered_devices(store):
         def all(self):
             return [metered, plain]
 
-        async def get_usage(self, device_id):
+        async def read_energy_snapshot(self, device_id):
             if device_id == metered.host:
-                return Usage(
-                    device_id=device_id,
-                    current_power_w=9.0,
-                    today_kwh=0.4,
-                    month_kwh=2.0,
-                )
+                return EnergySnapshot(power_w=9.0, today_kwh=0.4, month_kwh=2.0)
             raise EnergyUnsupportedError(device_id)
 
     async def drive():
@@ -118,7 +113,7 @@ def test_recorder_survives_a_failing_device(store):
         def all(self):
             return [boom]
 
-        async def get_usage(self, device_id):
+        async def read_energy_snapshot(self, device_id):
             raise RuntimeError("device exploded")
 
     async def drive():
@@ -131,6 +126,31 @@ def test_recorder_survives_a_failing_device(store):
     # Must not raise; nothing recorded for the failing device.
     asyncio.run(drive())
     assert store.recent_samples(boom.host, 0) == []
+
+
+def test_recorder_never_fetches_stats_tables(store):
+    # The recorder stores only scalars, so its per-cycle read must NOT pull the
+    # device's daily/monthly history tables (wasted device I/O every 5 minutes).
+    device = FakeDevice("10.0.0.4", has_energy=True)
+    energy = device.modules[Module.Energy]
+    reg = DeviceRegistry()
+    reg._devices = {device.host: device}
+
+    async def drive():
+        task = asyncio.create_task(run_recorder(reg, store, interval=0.01))
+        await asyncio.sleep(0.05)  # several cycles
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+    asyncio.run(drive())
+
+    # Zero stats-table fetches across every cycle...
+    assert energy.daily_stats_calls == 0
+    assert energy.monthly_stats_calls == 0
+    # ...yet the scalar readings were still recorded (matching FakeEnergy).
+    samples = store.recent_samples(device.host, 0)
+    assert samples and all(power == 12.5 for _ts, power in samples)
 
 
 # ── API ─────────────────────────────────────────────────────────────────────

@@ -2,6 +2,7 @@ import asyncio
 
 import pytest
 from conftest import FakeChild, FakeDevice, FakeDiscover
+from kasa import Module
 
 from api import kasa_service
 from api.device_store import DeviceSnapshotStore, HostStore
@@ -131,6 +132,48 @@ def test_get_usage_computes_cost_from_flat_rate():
 def test_get_usage_unknown_device():
     with pytest.raises(DeviceNotFoundError):
         asyncio.run(DeviceRegistry().get_usage("nope"))
+
+
+# ── read_energy_snapshot (light recorder read-path) ──────────────────────────
+
+
+def test_read_energy_snapshot_matches_get_usage_scalars():
+    # The snapshot's three scalars must equal what get_usage would report, so the
+    # recorded history is identical — just without the wasted stats-table fetches.
+    reg = DeviceRegistry()
+    reg._devices = {"10.0.0.7": FakeDevice("10.0.0.7", has_energy=True)}
+
+    usage = asyncio.run(reg.get_usage("10.0.0.7"))
+    snapshot = asyncio.run(reg.read_energy_snapshot("10.0.0.7"))
+
+    assert snapshot.power_w == usage.current_power_w == 12.5
+    assert snapshot.today_kwh == usage.today_kwh == 0.3
+    assert snapshot.month_kwh == usage.month_kwh == 4.2
+
+
+def test_read_energy_snapshot_never_fetches_stats_tables():
+    reg = DeviceRegistry()
+    device = FakeDevice("10.0.0.7", has_energy=True)
+    energy = device.modules[Module.Energy]
+    reg._devices = {device.host: device}
+
+    asyncio.run(reg.read_energy_snapshot(device.host))
+
+    assert energy.daily_stats_calls == 0
+    assert energy.monthly_stats_calls == 0
+    assert device.update_count == 1  # a plain refresh is enough for the scalars
+
+
+def test_read_energy_snapshot_unknown_device():
+    with pytest.raises(DeviceNotFoundError):
+        asyncio.run(DeviceRegistry().read_energy_snapshot("nope"))
+
+
+def test_read_energy_snapshot_without_emeter():
+    reg = DeviceRegistry()
+    reg._devices = {"10.0.0.8": FakeDevice("10.0.0.8")}
+    with pytest.raises(EnergyUnsupportedError):
+        asyncio.run(reg.read_energy_snapshot("10.0.0.8"))
 
 
 def test_get_usage_without_emeter():

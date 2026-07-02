@@ -45,10 +45,18 @@ class FakeEnergy:
     consumption_this_month = 4.2
     voltage = 120.0
 
+    def __init__(self) -> None:
+        # Count stats-table fetches so tests can assert the recorder's light
+        # snapshot read never triggers them — only the /usage path should.
+        self.daily_stats_calls = 0
+        self.monthly_stats_calls = 0
+
     async def get_daily_stats(self, *, kwh: bool = True) -> dict[int, float]:
+        self.daily_stats_calls += 1
         return {1: 0.1, 2: 0.25}
 
     async def get_monthly_stats(self, *, kwh: bool = True) -> dict[int, float]:
+        self.monthly_stats_calls += 1
         return {1: 1.0, 6: 4.2}
 
 

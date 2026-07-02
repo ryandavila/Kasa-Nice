@@ -586,6 +586,55 @@ def test_get_usage_branches_to_cloud_energy_summary():
     assert [s.label for s in usage.monthly] == ["Mar"]
 
 
+def test_read_energy_snapshot_cloud_returns_summary_scalars():
+    reg = DeviceRegistry()
+    summary = {
+        "current_power_w": 10.0,
+        "voltage": 120.0,
+        "today_kwh": 0.2,
+        "month_kwh": 4.0,
+        "daily_raw": {5: 0.1, 6: 0.2},
+        "monthly_raw": {3: 4.0},
+    }
+    reg._cloud_devices = {
+        "h": SimpleNamespace(host="h", energy_summary=AsyncMock(return_value=summary))
+    }
+
+    snapshot = asyncio.run(reg.read_energy_snapshot("h"))
+
+    assert snapshot.power_w == 10.0
+    assert snapshot.today_kwh == 0.2
+    assert snapshot.month_kwh == 4.0
+
+
+def test_read_energy_snapshot_cloud_round_trip_count_matches_get_usage():
+    # Invariant: the recorder's snapshot read of a cloud strip must cost exactly
+    # the same number of cloud round-trips as get_usage did (energy_summary()
+    # already batches the per-outlet fan-out; there's no cheaper scalar read).
+    clock = {"year": 2026, "month": 3, "mday": 6, "hour": 10, "min": 0, "sec": 0}
+
+    def build_registry() -> tuple[DeviceRegistry, AsyncMock]:
+        passthrough = AsyncMock(side_effect=_clock_route(clock))
+        device = _cloud_device(passthrough)
+        device.children = [
+            CloudChild(device, "c0", "Outlet 1", True),
+            CloudChild(device, "c1", "Outlet 2", False),
+        ]
+        reg = DeviceRegistry()
+        reg._cloud_devices = {device.host: device}
+        return reg, passthrough
+
+    usage_reg, usage_passthrough = build_registry()
+    asyncio.run(usage_reg.get_usage(next(iter(usage_reg._cloud_devices))))
+
+    snap_reg, snap_passthrough = build_registry()
+    asyncio.run(snap_reg.read_energy_snapshot(next(iter(snap_reg._cloud_devices))))
+
+    # One round-trip == one passthrough. Identical count, and non-trivial.
+    assert snap_passthrough.await_count == usage_passthrough.await_count
+    assert snap_passthrough.await_count > 0
+
+
 def test_build_usage_labels_and_rounds_history():
     usage = _build_usage(
         "dev",

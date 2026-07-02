@@ -20,6 +20,9 @@ A **FastAPI** backend ([`api/`](api/)) talks to your devices via
   devices with an energy meter
 - 📈 **Energy history** — power and daily-usage trends recorded server-side over
   time, retained beyond what each device remembers
+- 🔔 **Alerts** — get notified when a device drops offline/recovers or draws more
+  than a per-device wattage threshold, in-app (a header bell) and via an optional
+  webhook
 - 🔌 **Persistent discovery** — devices added by IP survive restarts
 - 🌗 **Light/dark theme** with an instant, no-flash toggle
 - 🐳 **Docker-ready** — one multi-stage image builds the frontend and serves it
@@ -79,6 +82,8 @@ All endpoints are under `/api`; interactive docs live at `http://localhost:8080/
 | `GET` / `PUT` | `/api/favorites` | Read / set the starred device ids |
 | `GET` / `POST` | `/api/schedules` | List schedule rules / create one (see [Schedules](#schedules)) |
 | `PATCH` / `DELETE` | `/api/schedules/{id}` | Update (partial) / delete a schedule rule |
+| `GET`  | `/api/alerts/recent` | Recent alerts from the in-memory ring buffer, newest first (see [Alerts](#alerts)) |
+| `GET` / `PUT` | `/api/alerts/thresholds` | Read / full-replace the per-device power-draw thresholds (`{"thresholds": {"<id>": watts}}`) |
 
 ## Configuration
 
@@ -90,6 +95,9 @@ All endpoints are under `/api`; interactive docs live at `http://localhost:8080/
 | `KASA_GROUPS_FILE` | `data/groups.json` | Where rooms and favorites are persisted |
 | `KASA_ENERGY_HISTORY_FILE` | `data/energy_history.db` | SQLite database of recorded energy samples |
 | `KASA_SCHEDULES_FILE` | `data/schedules.json` | Where schedule (timer) rules are persisted |
+| `KASA_ALERTS_FILE` | `data/alerts.json` | Where per-device power-draw alert thresholds are persisted |
+| `KASA_ALERT_INTERVAL` | `60` | Seconds between alert evaluations (min `10`) |
+| `KASA_ALERT_WEBHOOK_URL` | _(unset)_ | Optional URL each alert is POSTed to ([ntfy](https://ntfy.sh)-compatible); leave unset for in-app alerts only — see [Alerts](#alerts) |
 | `KASA_ENERGY_SAMPLE_INTERVAL` | `300` | Seconds between energy-history samples (min `10`). Higher = fewer reads, coarser history |
 | `TPLINK_USERNAME` | _(unset)_ | TP-Link cloud email, required for newer SMART-protocol devices (e.g. KP125M) |
 | `TPLINK_PASSWORD` | _(unset)_ | TP-Link cloud password, paired with `TPLINK_USERNAME` |
@@ -157,6 +165,34 @@ Weekdays are numbered `0`=Monday … `6`=Sunday. The rule schema carries a `kind
 discriminator (`"fixed_time"` today) so future rule kinds — sunrise/sunset,
 one-shot timers, brightness/colour actions — can be added without breaking
 existing rules.
+
+### Alerts
+
+A background task evaluates two detectors on an interval (`KASA_ALERT_INTERVAL`,
+default 60s):
+
+- **Reachability** — a device becoming unreachable, or recovering, versus the
+  previous evaluation.
+- **Power draw** — a device drawing more than a per-device wattage threshold. Set
+  a threshold per metered device from the header **bell** dropdown (blank = off);
+  thresholds persist to `KASA_ALERTS_FILE` (default `data/alerts.json`). Draw is
+  read from the recorded energy samples, so this adds no extra device polling.
+
+Alerts are **debounced** so one incident is one alert, not one per cycle: a
+reachability alert fires on the transition into the bad state (and a recovery
+alert on the way out), while a power alert fires only when draw crosses above the
+threshold and re-arms once it drops back below.
+
+Delivery is in-app and, optionally, outbound:
+
+- **In-app** — the newest alerts (a bounded ring buffer, up to 100) are shown in
+  the header bell dropdown, which polls `GET /api/alerts/recent`. The unseen count
+  is tracked client-side. The buffer is **in-memory only** — it is *not* persisted
+  across restarts in v1, so a restart starts with an empty alert history.
+- **Webhook** — set `KASA_ALERT_WEBHOOK_URL` to POST each alert to a URL in an
+  [ntfy](https://ntfy.sh)-compatible shape: the plain-text body is the alert
+  message and the `Title` header is a short title. Webhook failures are logged,
+  never fatal; leave it unset for in-app alerts only.
 
 Broadcast discovery only reaches devices on the server's own subnet — it can't
 cross VLAN boundaries. If your plugs live on a separate subnet (e.g. an isolated

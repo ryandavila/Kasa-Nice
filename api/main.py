@@ -8,6 +8,12 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
+from .alerts import (
+    alert_center,
+    alert_evaluator,
+    alert_thresholds,
+    run_alert_evaluator,
+)
 from .config import get_settings
 from .energy_history import history, load_sample_interval, run_recorder
 from .events import broadcaster
@@ -57,7 +63,21 @@ async def lifespan(app: FastAPI):
         scheduler = asyncio.create_task(
             run_scheduler(schedules, registry, groups, broadcaster)
         )
-        tasks = (discovery, recorder, scheduler)
+        # Evaluate the alert detectors (reachability + power thresholds) on their
+        # own interval; delivers to the in-app ring buffer and optional webhook.
+        settings = get_settings()
+        alerts = asyncio.create_task(
+            run_alert_evaluator(
+                registry,
+                alert_evaluator,
+                alert_center,
+                alert_thresholds,
+                interval=settings.kasa_alert_interval,
+                db_path=settings.kasa_energy_history_file,
+                webhook_url=settings.kasa_alert_webhook_url,
+            )
+        )
+        tasks = (discovery, recorder, scheduler, alerts)
     yield
     for task in tasks:
         task.cancel()

@@ -36,6 +36,10 @@ _DEFAULT_CLOUD_POLL_INTERVAL = 30.0
 _DEFAULT_ENERGY_SAMPLE_INTERVAL = 300.0
 _MIN_ENERGY_SAMPLE_INTERVAL = 10.0
 _DEFAULT_PORT = 8080
+# Alerts evaluate more often than energy is sampled (default 60s), floored so a
+# misconfigured tiny value can't busy-loop the evaluator.
+_DEFAULT_ALERT_INTERVAL = 60.0
+_MIN_ALERT_INTERVAL = 10.0
 
 
 class Settings(BaseSettings):
@@ -78,6 +82,8 @@ class Settings(BaseSettings):
     kasa_energy_history_file: Path = Path("data/energy_history.db")
     # Server-side schedule rules ("at HH:MM on these days, turn X on/off").
     kasa_schedules_file: Path = Path("data/schedules.json")
+    # Per-device power-draw alert thresholds (device_id -> watts), like favorites.
+    kasa_alerts_file: Path = Path("data/alerts.json")
 
     # ── Energy history / cost ────────────────────────────────────────────────
     kasa_energy_sample_interval: float = _DEFAULT_ENERGY_SAMPLE_INTERVAL
@@ -94,6 +100,14 @@ class Settings(BaseSettings):
     kasa_cloud_app_type: str = _DEFAULT_APP_TYPE
     kasa_cloud_app_version: str = _DEFAULT_APP_VERSION
     kasa_cloud_terminal_uuid: str | None = None
+
+    # ── Alerts ───────────────────────────────────────────────────────────────
+    # Seconds between alert evaluations (reachability + power-draw thresholds).
+    kasa_alert_interval: float = _DEFAULT_ALERT_INTERVAL
+    # Optional outbound webhook. When set, each alert is POSTed ntfy-compatibly
+    # (plain-text body = message, ``Title`` header = a short title). None => the
+    # in-app ring buffer only; a delivery failure is logged, never fatal.
+    kasa_alert_webhook_url: str | None = None
 
     # ── Test-only seams ──────────────────────────────────────────────────────
     # Serve in-process fake devices instead of scanning, so the browser e2e test
@@ -159,6 +173,22 @@ class Settings(BaseSettings):
                 f"Ignoring invalid KASA_ENERGY_SAMPLE_INTERVAL={value!r}; using 300s"
             )
             return _DEFAULT_ENERGY_SAMPLE_INTERVAL
+
+    @field_validator("kasa_alert_interval", mode="before")
+    @classmethod
+    def _parse_alert_interval(cls, value: object) -> float:
+        # Floored at 10s so a misconfigured tiny value can't busy-loop the
+        # evaluator (mirrors the energy-sample-interval knob).
+        if value is None:
+            return _DEFAULT_ALERT_INTERVAL
+        text = str(value).strip()
+        if not text:
+            return _DEFAULT_ALERT_INTERVAL
+        try:
+            return max(_MIN_ALERT_INTERVAL, float(text))
+        except ValueError:
+            logger.warning(f"Ignoring invalid KASA_ALERT_INTERVAL={value!r}; using 60s")
+            return _DEFAULT_ALERT_INTERVAL
 
     @field_validator("kasa_port", mode="before")
     @classmethod

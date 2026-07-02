@@ -417,3 +417,36 @@ class EnergyInsights(BaseModel):
     rooms: list[RoomUsage] = Field(default_factory=list)
     week: WeekComparison
     idle: list[IdleDevice] = Field(default_factory=list)
+
+
+# ── Alerts ──────────────────────────────────────────────────────────────────
+
+# Alert kinds v1 emits. Left open as a Literal so a future detector adds a value
+# without reshaping the model; the frontend maps each to an icon/label.
+AlertType = Literal["device_unreachable", "device_recovered", "power_exceeded"]
+
+
+class Alert(BaseModel):
+    """One delivered alert: an immutable record served from the ring buffer.
+
+    ``power_w``/``threshold_w`` are populated only for ``power_exceeded`` so the
+    UI can show "42 W (over 30 W)" without re-deriving it from the message.
+    """
+
+    id: str
+    ts: int = Field(description="Unix epoch seconds when the alert fired.")
+    type: AlertType
+    device_id: str
+    message: str = Field(description="Human-readable, also used as the webhook body.")
+    power_w: float | None = None
+    threshold_w: float | None = None
+
+
+class AlertThresholds(BaseModel):
+    """Per-device power-draw thresholds in watts (device_id -> watts).
+
+    A full-replace document, mirroring ``Favorites``: ``PUT`` overwrites the whole
+    mapping. Only positive thresholds are meaningful; the store drops the rest.
+    """
+
+    thresholds: dict[str, float] = Field(default_factory=dict)

@@ -1,4 +1,6 @@
 import type {
+	Alert,
+	AlertThresholds,
 	Device,
 	EnergyHistory,
 	EnergyInsights,
@@ -158,3 +160,15 @@ export const updateSchedule = (id: string, patch_: ScheduleUpdate) =>
 	patch<Schedule>(`/schedules/${encodeURIComponent(id)}`, patch_);
 
 export const deleteSchedule = (id: string) => del(`/schedules/${encodeURIComponent(id)}`);
+
+// ── Alerts ──────────────────────────────────────────────────────────────────
+
+/** Recent alerts from the server's in-memory ring buffer (newest first). */
+export const getRecentAlerts = () => request<Alert[]>('/alerts/recent');
+
+/** Read the per-device power-draw thresholds (device_id -> watts). */
+export const getAlertThresholds = () => request<AlertThresholds>('/alerts/thresholds');
+
+/** Full-replace the per-device power-draw thresholds; returns the sanitized map. */
+export const setAlertThresholds = (thresholds: Record<string, number>) =>
+	put<AlertThresholds>('/alerts/thresholds', { thresholds });

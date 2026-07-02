@@ -252,3 +252,27 @@ export interface EnergyInsights {
 	week: WeekComparison;
 	idle: IdleDevice[];
 }
+
+// ── Alerts ──────────────────────────────────────────────────────────────────
+
+export type AlertType = 'device_unreachable' | 'device_recovered' | 'power_exceeded';
+
+/** One delivered alert from the server's recent-alerts ring buffer. */
+export interface Alert {
+	id: string;
+	/** Unix epoch seconds when the alert fired. */
+	ts: number;
+	type: AlertType;
+	device_id: string;
+	/** Human-readable message (also the webhook body). */
+	message: string;
+	/** Live draw at the time, for `power_exceeded` alerts only. */
+	power_w: number | null;
+	/** The configured threshold, for `power_exceeded` alerts only. */
+	threshold_w: number | null;
+}
+
+/** Per-device power-draw thresholds in watts (device_id -> watts); a full-replace map. */
+export interface AlertThresholds {
+	thresholds: Record<string, number>;
+}

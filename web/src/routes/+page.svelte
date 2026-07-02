@@ -10,6 +10,7 @@
 	import RoomsView from '$lib/components/RoomsView.svelte';
 	import SchedulesView from '$lib/components/SchedulesView.svelte';
 	import ThemeToggle from '$lib/components/ThemeToggle.svelte';
+	import AlertsBell from '$lib/components/AlertsBell.svelte';
 
 	type Tab = 'devices' | 'energy' | 'schedules' | 'discovery';
 	let tab = $state<Tab>('devices');
@@ -122,6 +123,7 @@
 				<Icon name="refresh" size={16} class={loading ? 'animate-spin' : ''} />
 				<span class="hidden sm:inline">Rediscover</span>
 			</button>
+			<AlertsBell />
 			<ThemeToggle />
 		</div>
 	</header>

@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 Hsv = tuple[int, int, int]
 
@@ -310,6 +310,75 @@ class ScheduleUpdate(BaseModel):
     def _validate_days(cls, days: list[int] | None) -> list[int] | None:
         # As the other schemas, but tolerate the field being omitted.
         return None if days is None else _normalize_days(days)
+
+
+# ── Scenes ──────────────────────────────────────────────────────────────────
+
+
+class SceneEntryState(BaseModel):
+    """A saved state for one device: power, plus optional light settings.
+
+    ``brightness``/``hsv`` are only meaningful for dimmable/colour lights, so
+    they're optional — a plain plug entry carries just ``on``. They're applied on
+    apply only when the entry leaves the device on (see ``scene_service``).
+    """
+
+    on: bool
+    brightness: int | None = Field(default=None, ge=0, le=100)
+    hsv: Hsv | None = None
+
+
+class SceneEntry(BaseModel):
+    """One device's target state within a scene, keyed by stable device id."""
+
+    device_id: str = Field(min_length=1)
+    state: SceneEntryState
+
+
+class Scene(BaseModel):
+    """A named preset: a set of per-device states applied together."""
+
+    id: str
+    name: str
+    entries: list[SceneEntry] = Field(default_factory=list)
+
+
+class SceneCreate(BaseModel):
+    """Create a scene one of two ways (exactly one is required).
+
+    Supply explicit ``entries`` to save a hand-built state, or ``device_ids`` to
+    have the server snapshot those devices' CURRENT state into entries. Providing
+    both or neither is a 422 — they're alternatives, not a merge.
+    """
+
+    name: str = Field(min_length=1)
+    entries: list[SceneEntry] | None = None
+    device_ids: list[str] | None = None
+
+    @model_validator(mode="after")
+    def _exactly_one_source(self) -> SceneCreate:
+        # XOR: `is None` equality is True when both are set or both are unset.
+        if (self.entries is None) == (self.device_ids is None):
+            raise ValueError("provide exactly one of 'entries' or 'device_ids'")
+        return self
+
+
+class SceneUpdate(BaseModel):
+    """Partial update of a scene: rename and/or replace its entries."""
+
+    name: str | None = Field(default=None, min_length=1)
+    entries: list[SceneEntry] | None = None
+
+
+class SceneApplyResult(BaseModel):
+    """Outcome of applying a scene, mirroring ``PowerResult``'s fan-out shape.
+
+    Reports which devices reached their saved state and which couldn't (offline,
+    no longer known, or a failed brightness/colour step).
+    """
+
+    succeeded: list[str] = Field(default_factory=list)
+    failed: list[str] = Field(default_factory=list)
 
 
 # ── Persisted energy history ────────────────────────────────────────────────

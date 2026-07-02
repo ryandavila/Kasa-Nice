@@ -9,6 +9,9 @@ import type {
 	Group,
 	Hsv,
 	PowerResult,
+	Scene,
+	SceneApplyResult,
+	SceneEntry,
 	Schedule,
 	ScheduleCreate,
 	ScheduleUpdate,
@@ -172,3 +175,26 @@ export const getAlertThresholds = () => request<AlertThresholds>('/alerts/thresh
 /** Full-replace the per-device power-draw thresholds; returns the sanitized map. */
 export const setAlertThresholds = (thresholds: Record<string, number>) =>
 	put<AlertThresholds>('/alerts/thresholds', { thresholds });
+
+// ── Scenes ──────────────────────────────────────────────────────────────────
+
+export const listScenes = () => request<Scene[]>('/scenes');
+
+/**
+ * Create a scene either from explicit `entries` or by snapshotting the current
+ * state of `device_ids` (the server captures on/off + brightness/color). Exactly
+ * one source may be given, mirroring the backend's validation.
+ */
+export const createScene = (
+	name: string,
+	source: { entries: SceneEntry[] } | { device_ids: string[] }
+) => post<Scene>('/scenes', { name, ...source });
+
+export const updateScene = (id: string, patch_: { name?: string; entries?: SceneEntry[] }) =>
+	patch<Scene>(`/scenes/${encodeURIComponent(id)}`, patch_);
+
+export const deleteScene = (id: string) => del(`/scenes/${encodeURIComponent(id)}`);
+
+/** Apply a scene; reports which devices reached their saved state and which failed. */
+export const applyScene = (id: string) =>
+	post<SceneApplyResult>(`/scenes/${encodeURIComponent(id)}/apply`);

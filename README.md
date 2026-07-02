@@ -16,6 +16,8 @@ A **FastAPI** backend ([`api/`](api/)) talks to your devices via
   individual outlets on power strips
 - 🗂️ **Rooms & favorites** — group devices into rooms and star the ones you reach
   for most; toggle between a by-type and a by-room view
+- 🎬 **Scenes** — snapshot a set of devices' current state and re-apply it in one
+  tap (power, brightness, and colour), tolerating an offline device
 - 📊 **Energy monitoring** — live power draw plus daily/monthly usage charts for
   devices with an energy meter
 - 📈 **Energy history** — power and daily-usage trends recorded server-side over
@@ -82,6 +84,9 @@ All endpoints are under `/api`; interactive docs live at `http://localhost:8080/
 | `GET` / `PUT` | `/api/favorites` | Read / set the starred device ids |
 | `GET` / `POST` | `/api/schedules` | List schedule rules / create one (see [Schedules](#schedules)) |
 | `PATCH` / `DELETE` | `/api/schedules/{id}` | Update (partial) / delete a schedule rule |
+| `GET` / `POST` | `/api/scenes` | List scenes / create one (`{"name", "entries"}` or `{"name", "device_ids"}` — see [Scenes](#scenes)) |
+| `PATCH` / `DELETE` | `/api/scenes/{id}` | Rename and/or replace a scene's entries / delete it |
+| `POST` | `/api/scenes/{id}/apply` | Apply a scene; returns `{succeeded, failed}` |
 | `GET`  | `/api/alerts/recent` | Recent alerts from the in-memory ring buffer, newest first (see [Alerts](#alerts)) |
 | `GET` / `PUT` | `/api/alerts/thresholds` | Read / full-replace the per-device power-draw thresholds (`{"thresholds": {"<id>": watts}}`) |
 
@@ -95,6 +100,7 @@ All endpoints are under `/api`; interactive docs live at `http://localhost:8080/
 | `KASA_GROUPS_FILE` | `data/groups.json` | Where rooms and favorites are persisted |
 | `KASA_ENERGY_HISTORY_FILE` | `data/energy_history.db` | SQLite database of recorded energy samples |
 | `KASA_SCHEDULES_FILE` | `data/schedules.json` | Where schedule (timer) rules are persisted |
+| `KASA_SCENES_FILE` | `data/scenes.json` | Where scenes (saved per-device states) are persisted |
 | `KASA_ALERTS_FILE` | `data/alerts.json` | Where per-device power-draw alert thresholds are persisted |
 | `KASA_ALERT_INTERVAL` | `60` | Seconds between alert evaluations (min `10`) |
 | `KASA_ALERT_WEBHOOK_URL` | _(unset)_ | Optional URL each alert is POSTed to ([ntfy](https://ntfy.sh)-compatible); leave unset for in-app alerts only — see [Alerts](#alerts) |
@@ -165,6 +171,24 @@ Weekdays are numbered `0`=Monday … `6`=Sunday. The rule schema carries a `kind
 discriminator (`"fixed_time"` today) so future rule kinds — sunrise/sunset,
 one-shot timers, brightness/colour actions — can be added without breaking
 existing rules.
+
+### Scenes
+
+The **Scenes** tab lets you save a per-device state and apply it in one tap —
+e.g. a _"Movie night"_ scene that dims the lamp and turns the overhead off.
+Create a scene from the current state of any devices you pick (the server
+snapshots each device's on/off, plus brightness and colour where supported),
+then rename, delete, or **apply** it. Applying fans out across the scene's
+devices concurrently and tolerates per-device failure — one unreachable device
+doesn't stop the rest — reporting how many devices reached their saved state
+(`{succeeded, failed}`), the same shape as the room/global power actions.
+
+Brightness and colour are re-applied only for entries that leave a device **on**
+(they're meaningless on an off light). Applying is a plain server function
+(`api/scene_service.py:apply_scene`) callable by id without going through HTTP,
+so a future schedule can trigger a scene, not just an on/off. Scenes persist to
+`KASA_SCENES_FILE` (default `data/scenes.json`) — mount it as a volume to keep
+them across rebuilds.
 
 ### Alerts
 

@@ -179,6 +179,38 @@ export interface ScheduleUpdate {
 	action?: ScheduleAction;
 }
 
+// ── Scenes ──────────────────────────────────────────────────────────────────
+
+/** A device's saved state within a scene; brightness/hsv only apply to lights. */
+export interface SceneEntryState {
+	on: boolean;
+	/** Target brightness 0-100; omitted/null for non-dimmable devices. */
+	brightness?: number | null;
+	/** Target color; omitted/null for non-color devices. */
+	hsv?: Hsv | null;
+}
+
+/** One device's target state within a scene, keyed by stable device id. */
+export interface SceneEntry {
+	device_id: string;
+	state: SceneEntryState;
+}
+
+/** A named preset: a set of per-device states applied together as one action. */
+export interface Scene {
+	id: string;
+	name: string;
+	entries: SceneEntry[];
+}
+
+/** Outcome of applying a scene: which devices reached their saved state. */
+export interface SceneApplyResult {
+	/** Device ids that reached their saved state. */
+	succeeded: string[];
+	/** Device ids that couldn't be set (offline, unknown, or a failed step). */
+	failed: string[];
+}
+
 /** One persisted power reading: unix epoch seconds and watts (null if unread). */
 export interface EnergySample {
 	ts: number;

@@ -84,6 +84,8 @@ class Settings(BaseSettings):
     kasa_schedules_file: Path = Path("data/schedules.json")
     # Per-device power-draw alert thresholds (device_id -> watts), like favorites.
     kasa_alerts_file: Path = Path("data/alerts.json")
+    # Named scenes: a saved per-device state applied as one action.
+    kasa_scenes_file: Path = Path("data/scenes.json")
 
     # ── Energy history / cost ────────────────────────────────────────────────
     kasa_energy_sample_interval: float = _DEFAULT_ENERGY_SAMPLE_INTERVAL

@@ -4,6 +4,10 @@
 	import { groupStore } from '$lib/stores/groups.svelte';
 	import Icon from './Icon.svelte';
 	import DeviceCard from './DeviceCard.svelte';
+	import Toggle from './Toggle.svelte';
+
+	// Any device on anywhere enables the global "Everything off" action.
+	const anyOn = $derived(deviceStore.devices.some((d) => d.is_on));
 
 	// Devices the user has starred, in the main list's order.
 	const favorites = $derived(deviceStore.devices.filter((d) => groupStore.isFavorite(d.id)));
@@ -78,41 +82,55 @@
 			{rooms.length}
 			{rooms.length === 1 ? 'room' : 'rooms'}
 		</p>
-		{#if adding}
-			<form class="flex items-center gap-2" onsubmit={(e) => (e.preventDefault(), submitNewRoom())}>
-				<!-- svelte-ignore a11y_autofocus -->
-				<input
-					bind:value={newName}
-					autofocus
-					placeholder="Room name"
-					onkeydown={(e) => e.key === 'Escape' && (adding = false)}
-					class="h-9 rounded-full border border-line bg-surface px-4 text-sm text-ink outline-none focus:border-accent"
-				/>
-				<button
-					type="submit"
-					class="h-9 rounded-full bg-accent px-4 text-sm font-semibold text-[#04201f] hover:brightness-105"
-				>
-					Add
-				</button>
-				<button
-					type="button"
-					onclick={() => ((adding = false), (newName = ''))}
-					aria-label="Cancel"
-					class="grid h-9 w-9 place-items-center rounded-full border border-line text-muted hover:text-ink"
-				>
-					<Icon name="x" size={16} />
-				</button>
-			</form>
-		{:else}
+		<div class="flex items-center gap-2">
 			<button
 				type="button"
-				onclick={() => (adding = true)}
-				class="flex h-9 items-center gap-2 rounded-full border border-line bg-surface px-4 text-sm font-medium text-muted transition-colors hover:border-accent hover:text-accent-ink"
+				onclick={() => deviceStore.setAllPower(deviceStore.devices, false)}
+				disabled={!anyOn}
+				class="flex h-9 items-center gap-2 rounded-full border border-line bg-surface px-4 text-sm font-medium text-muted transition-colors hover:border-red-500 hover:text-red-500 disabled:opacity-40 disabled:hover:border-line disabled:hover:text-muted"
 			>
-				<Icon name="plus" size={16} />
-				New room
+				<Icon name="power" size={16} />
+				Everything off
 			</button>
-		{/if}
+			{#if adding}
+				<form
+					class="flex items-center gap-2"
+					onsubmit={(e) => (e.preventDefault(), submitNewRoom())}
+				>
+					<!-- svelte-ignore a11y_autofocus -->
+					<input
+						bind:value={newName}
+						autofocus
+						placeholder="Room name"
+						onkeydown={(e) => e.key === 'Escape' && (adding = false)}
+						class="h-9 rounded-full border border-line bg-surface px-4 text-sm text-ink outline-none focus:border-accent"
+					/>
+					<button
+						type="submit"
+						class="h-9 rounded-full bg-accent px-4 text-sm font-semibold text-[#04201f] hover:brightness-105"
+					>
+						Add
+					</button>
+					<button
+						type="button"
+						onclick={() => ((adding = false), (newName = ''))}
+						aria-label="Cancel"
+						class="grid h-9 w-9 place-items-center rounded-full border border-line text-muted hover:text-ink"
+					>
+						<Icon name="x" size={16} />
+					</button>
+				</form>
+			{:else}
+				<button
+					type="button"
+					onclick={() => (adding = true)}
+					class="flex h-9 items-center gap-2 rounded-full border border-line bg-surface px-4 text-sm font-medium text-muted transition-colors hover:border-accent hover:text-accent-ink"
+				>
+					<Icon name="plus" size={16} />
+					New room
+				</button>
+			{/if}
+		</div>
 	</div>
 
 	<!-- ── Per-room sections ──────────────────────────────────────────────── -->
@@ -148,6 +166,14 @@
 				{/if}
 				<span class="h-px grow bg-line"></span>
 				<span class="font-mono text-xs text-faint">{room.devices.length}</span>
+				{#if room.devices.length}
+					<Toggle
+						size="sm"
+						checked={room.devices.some((d) => d.is_on)}
+						onchange={(on) => deviceStore.setGroupPower(room.id, room.devices, on)}
+						label="Toggle all in {room.name}"
+					/>
+				{/if}
 				<button
 					type="button"
 					onclick={() => groupStore.deleteRoom(room.id)}

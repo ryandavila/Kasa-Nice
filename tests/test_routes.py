@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from api import routes
+from api.group_store import GroupStore
 from api.kasa_service import DeviceRegistry
 
 
@@ -200,3 +201,104 @@ def test_usage(client):
 
 def test_usage_without_emeter_404(client):
     assert client.get("/api/devices/10.0.0.1/usage").status_code == 404
+
+
+# ── Room & global power fan-out ───────────────────────────────────────────────
+
+
+async def _boom() -> None:
+    raise RuntimeError("device offline")
+
+
+@pytest.fixture
+def groups_store(monkeypatch, tmp_path):
+    """A fresh, isolated group store wired into the routes for room-power tests."""
+    store = GroupStore(tmp_path / "groups.json")
+    monkeypatch.setattr(routes, "groups", store)
+    return store
+
+
+def _make_group(store, device_ids):
+    g = store.create_group("Living Room")
+    return store.update_group(g["id"], device_ids=device_ids)["id"]
+
+
+def test_group_power_all_succeed(client, groups_store):
+    gid = _make_group(groups_store, ["10.0.0.1", "10.0.0.2"])
+    r = client.post(f"/api/groups/{gid}/power", json={"on": True})
+    assert r.status_code == 200
+    assert r.json() == {"on": True, "succeeded": ["10.0.0.1", "10.0.0.2"], "failed": []}
+    assert routes.registry.get("10.0.0.1").is_on is True
+    assert routes.registry.get("10.0.0.2").is_on is True
+
+
+def test_group_power_partial_failure_stays_200(client, groups_store, monkeypatch):
+    # One device errors when toggled; the others still switch and it's reported
+    # under failed, not as a 500.
+    monkeypatch.setattr(routes.registry.get("10.0.0.2"), "turn_on", _boom)
+    gid = _make_group(groups_store, ["10.0.0.1", "10.0.0.2"])
+    r = client.post(f"/api/groups/{gid}/power", json={"on": True})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["succeeded"] == ["10.0.0.1"]
+    assert body["failed"] == ["10.0.0.2"]
+    assert routes.registry.get("10.0.0.1").is_on is True
+
+
+def test_group_power_missing_device_counts_as_failed(client, groups_store):
+    # A device that's no longer in the registry is a failure, not a crash.
+    gid = _make_group(groups_store, ["10.0.0.1", "9.9.9.9"])
+    r = client.post(f"/api/groups/{gid}/power", json={"on": True})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["succeeded"] == ["10.0.0.1"]
+    assert body["failed"] == ["9.9.9.9"]
+
+
+def test_group_power_unknown_group_404(client, groups_store):
+    assert client.post("/api/groups/nope/power", json={"on": True}).status_code == 404
+
+
+def test_group_power_nudges_broadcaster(client, groups_store, monkeypatch):
+    nudge = AsyncMock()
+    monkeypatch.setattr(routes.broadcaster, "publish_now", nudge)
+    gid = _make_group(groups_store, ["10.0.0.1"])
+    assert client.post(f"/api/groups/{gid}/power", json={"on": True}).status_code == 200
+    nudge.assert_awaited_once()
+
+
+def test_group_power_nudges_broadcaster_on_partial_failure(
+    client, groups_store, monkeypatch
+):
+    # Some devices changed, so other clients must be told even when one failed.
+    nudge = AsyncMock()
+    monkeypatch.setattr(routes.broadcaster, "publish_now", nudge)
+    gid = _make_group(groups_store, ["10.0.0.1", "9.9.9.9"])
+    assert client.post(f"/api/groups/{gid}/power", json={"on": True}).status_code == 200
+    nudge.assert_awaited_once()
+
+
+def test_all_power_switches_every_device(client):
+    r = client.post("/api/power", json={"on": True})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["on"] is True
+    assert set(body["succeeded"]) == {"10.0.0.1", "10.0.0.2", "10.0.0.3", "10.0.0.4"}
+    assert body["failed"] == []
+    assert all(d.is_on for d in routes.registry.all())
+
+
+def test_all_power_partial_failure_stays_200(client, monkeypatch):
+    monkeypatch.setattr(routes.registry.get("10.0.0.3"), "turn_off", _boom)
+    r = client.post("/api/power", json={"on": False})
+    assert r.status_code == 200
+    body = r.json()
+    assert "10.0.0.3" in body["failed"]
+    assert "10.0.0.1" in body["succeeded"]
+
+
+def test_all_power_nudges_broadcaster(client, monkeypatch):
+    nudge = AsyncMock()
+    monkeypatch.setattr(routes.broadcaster, "publish_now", nudge)
+    assert client.post("/api/power", json={"on": False}).status_code == 200
+    nudge.assert_awaited_once()

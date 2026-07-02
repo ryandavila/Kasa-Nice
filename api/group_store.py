@@ -67,6 +67,13 @@ class GroupStore:
     def list_groups(self) -> list[dict]:
         return self._read()["groups"]
 
+    def get_group(self, group_id: str) -> dict | None:
+        """Return a group by id, or None if the id is unknown."""
+        for group in self._read()["groups"]:
+            if group["id"] == group_id:
+                return group
+        return None
+
     def create_group(self, name: str) -> dict:
         data = self._read()
         group = {"id": uuid.uuid4().hex, "name": name, "device_ids": []}

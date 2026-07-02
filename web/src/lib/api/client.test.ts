@@ -6,7 +6,9 @@ import {
 	getHistory,
 	createGroup,
 	deleteGroup,
-	setFavorites
+	setFavorites,
+	setGroupPower,
+	setAllPower
 } from './client';
 
 function mockFetch(impl: (url: string, init?: RequestInit) => unknown) {
@@ -110,5 +112,22 @@ describe('endpoint shapes', () => {
 			method: 'PUT',
 			body: JSON.stringify({ device_ids: ['10.0.0.1'] })
 		});
+	});
+
+	it('setGroupPower POSTs the on flag to the room power path', async () => {
+		const fetchFn = mockFetch(() => ok({ on: false, succeeded: [], failed: [] }));
+		await setGroupPower('room 1', false);
+		const [url, init] = fetchFn.mock.calls[0];
+		expect(url).toBe('/api/groups/room%201/power');
+		expect(init).toMatchObject({ method: 'POST', body: JSON.stringify({ on: false }) });
+	});
+
+	it('setAllPower POSTs the on flag to the global power path', async () => {
+		const fetchFn = mockFetch(() => ok({ on: false, succeeded: ['a'], failed: [] }));
+		const result = await setAllPower(false);
+		const [url, init] = fetchFn.mock.calls[0];
+		expect(url).toBe('/api/power');
+		expect(init).toMatchObject({ method: 'POST', body: JSON.stringify({ on: false }) });
+		expect(result).toEqual({ on: false, succeeded: ['a'], failed: [] });
 	});
 });

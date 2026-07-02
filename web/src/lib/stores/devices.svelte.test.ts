@@ -21,7 +21,9 @@ vi.mock('$lib/api/client', () => {
 		setPower: vi.fn(),
 		setBrightness: vi.fn(),
 		setColorHex: vi.fn(),
-		setChildPower: vi.fn()
+		setChildPower: vi.fn(),
+		setGroupPower: vi.fn(),
+		setAllPower: vi.fn()
 	};
 });
 
@@ -38,6 +40,8 @@ const setChildPower = client.setChildPower as Mock;
 const setBrightness = client.setBrightness as Mock;
 const setColorHex = client.setColorHex as Mock;
 const setPower = client.setPower as Mock;
+const setGroupPower = client.setGroupPower as Mock;
+const setAllPower = client.setAllPower as Mock;
 
 function strip(): Device {
 	return {
@@ -133,6 +137,50 @@ describe('setColor optimistic revert', () => {
 		await deviceStore.setColor(d, '#ff0000');
 		expect(d.hsv).toEqual([200, 50, 50]);
 		expect(d.is_on).toBe(false);
+	});
+});
+
+describe('setGroupPower / setAllPower fan-out', () => {
+	it('optimistically switches every device and keeps them on full success', async () => {
+		const a = makeDevice({ id: 'a', is_on: false });
+		const b = makeDevice({ id: 'b', is_on: false });
+		deviceStore.devices = [a, b];
+		setGroupPower.mockResolvedValue({ on: true, succeeded: ['a', 'b'], failed: [] });
+
+		await deviceStore.setGroupPower('room1', [a, b], true);
+
+		expect(setGroupPower).toHaveBeenCalledWith('room1', true);
+		expect(a.is_on).toBe(true);
+		expect(b.is_on).toBe(true);
+		expect(pushed).toHaveLength(0); // no error toast on full success
+	});
+
+	it('rolls back only the failed devices and toasts the count on partial failure', async () => {
+		const a = makeDevice({ id: 'a', is_on: false });
+		const b = makeDevice({ id: 'b', is_on: false });
+		deviceStore.devices = [a, b];
+		setGroupPower.mockResolvedValue({ on: true, succeeded: ['a'], failed: ['b'] });
+
+		await deviceStore.setGroupPower('room1', [a, b], true);
+
+		expect(a.is_on).toBe(true); // succeeded: stays switched
+		expect(b.is_on).toBe(false); // failed: reverted
+		expect(pushed[0].kind).toBe('error');
+		expect(pushed[0].message).toBe("1 device didn't respond");
+	});
+
+	it('reverts every device when the whole request fails', async () => {
+		const a = makeDevice({ id: 'a', is_on: true });
+		const b = makeDevice({ id: 'b', is_on: true });
+		deviceStore.devices = [a, b];
+		setAllPower.mockRejectedValue(new Error('offline'));
+
+		await deviceStore.setAllPower([a, b], false);
+
+		expect(setAllPower).toHaveBeenCalledWith(false);
+		expect(a.is_on).toBe(true); // reverted
+		expect(b.is_on).toBe(true);
+		expect(pushed[0].kind).toBe('error');
 	});
 });
 

@@ -1,3 +1,4 @@
+import asyncio
 import time
 
 from fastapi import APIRouter, HTTPException
@@ -12,6 +13,7 @@ from .kasa_service import (
     hex_to_hsv,
     registry,
     serialize_device,
+    stable_device_id,
 )
 from .schemas import (
     BrightnessRequest,
@@ -26,6 +28,7 @@ from .schemas import (
     GroupCreate,
     GroupUpdate,
     PowerRequest,
+    PowerResult,
     ServerConfig,
     ServerStatus,
     SubnetScanRequest,
@@ -33,6 +36,25 @@ from .schemas import (
 )
 
 router = APIRouter(prefix="/api")
+
+
+async def _set_power_many(device_ids: list[str], on: bool) -> PowerResult:
+    """Switch many devices concurrently, tolerating per-device failure.
+
+    Fires every ``set_power`` at once and collects the outcomes: a device that
+    errors or no longer exists in the registry is reported under ``failed``
+    instead of aborting the batch. Callers publish the SSE update afterwards,
+    since the devices that did switch changed state.
+    """
+    results = await asyncio.gather(
+        *(registry.set_power(device_id, on) for device_id in device_ids),
+        return_exceptions=True,
+    )
+    succeeded: list[str] = []
+    failed: list[str] = []
+    for device_id, result in zip(device_ids, results, strict=True):
+        (failed if isinstance(result, Exception) else succeeded).append(device_id)
+    return PowerResult(on=on, succeeded=succeeded, failed=failed)
 
 
 @router.get("/health")
@@ -166,6 +188,16 @@ async def set_child_power(device_id: str, child_id: str, req: PowerRequest) -> D
     return serialize_device(device)
 
 
+@router.post("/power", response_model=PowerResult)
+async def set_all_power(req: PowerRequest) -> PowerResult:
+    """Switch every known device at once (primarily 'everything off')."""
+    ids = [stable_device_id(d) for d in registry.all()]
+    result = await _set_power_many(ids, req.on)
+    # Push even on partial failure: the devices that did switch changed state.
+    await broadcaster.publish_now()
+    return result
+
+
 @router.get("/devices/{device_id}/history", response_model=EnergyHistory)
 async def device_history(
     device_id: str, hours: int = 24, days: int = 30
@@ -221,6 +253,18 @@ async def update_group(group_id: str, req: GroupUpdate) -> Group:
 async def delete_group(group_id: str) -> None:
     if not groups.delete_group(group_id):
         raise HTTPException(status_code=404, detail=f"Unknown group: {group_id}")
+
+
+@router.post("/groups/{group_id}/power", response_model=PowerResult)
+async def set_group_power(group_id: str, req: PowerRequest) -> PowerResult:
+    """Switch every device in a room at once, tolerating per-device failure."""
+    group = groups.get_group(group_id)
+    if group is None:
+        raise HTTPException(status_code=404, detail=f"Unknown group: {group_id}")
+    result = await _set_power_many(group["device_ids"], req.on)
+    # Push even on partial failure: the devices that did switch changed state.
+    await broadcaster.publish_now()
+    return result
 
 
 @router.get("/favorites", response_model=Favorites)

@@ -89,6 +89,15 @@ export interface Favorites {
 	device_ids: string[];
 }
 
+/** Outcome of a fan-out power action across many devices (a room, or all of them). */
+export interface PowerResult {
+	on: boolean;
+	/** Device ids that switched successfully. */
+	succeeded: string[];
+	/** Device ids that couldn't be switched (unreachable or no longer known). */
+	failed: string[];
+}
+
 /** One persisted power reading: unix epoch seconds and watts (null if unread). */
 export interface EnergySample {
 	ts: number;

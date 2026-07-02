@@ -8,9 +8,11 @@ import {
 	setBrightness,
 	setColorHex,
 	setChildPower,
+	setGroupPower,
+	setAllPower,
 	ApiError
 } from '$lib/api/client';
-import type { Device, DeviceType } from '$lib/api/types';
+import type { Device, DeviceType, PowerResult } from '$lib/api/types';
 import { toasts } from './toasts.svelte';
 
 /** Display order for the grouped device sections. */
@@ -262,6 +264,49 @@ class DeviceStore {
 				device.is_on = prevOn;
 			}
 		);
+	}
+
+	/** Switch every device in a room at once (a room master toggle). */
+	setGroupPower(groupId: string, devices: Device[], on: boolean) {
+		return this.runMany(devices, on, () => setGroupPower(groupId, on));
+	}
+
+	/** Switch every device at once (e.g. the "Everything off" button). */
+	setAllPower(devices: Device[], on: boolean) {
+		return this.runMany(devices, on, () => setAllPower(on));
+	}
+
+	/**
+	 * Fan a power action out over many devices: flip them optimistically, then
+	 * reconcile with the server's per-device result. A hard request failure reverts
+	 * everything; a partial failure rolls back only the devices that didn't switch
+	 * (keeping the successful ones), and toasts how many failed — the SSE stream
+	 * settles true state regardless. Affected devices are marked busy so a
+	 * concurrent poll can't clobber the optimistic flip mid-flight.
+	 */
+	private async runMany(devices: Device[], on: boolean, action: () => Promise<PowerResult>) {
+		const prev = new Map(devices.map((d) => [d.id, d.is_on]));
+		for (const d of devices) {
+			d.is_on = on; // optimistic
+			this.busy[d.id] = true;
+		}
+		try {
+			const { failed } = await action();
+			for (const d of devices) {
+				if (failed.includes(d.id)) d.is_on = prev.get(d.id) ?? d.is_on;
+			}
+			if (failed.length) {
+				toasts.push(
+					`${failed.length} device${failed.length === 1 ? '' : 's'} didn't respond`,
+					'error'
+				);
+			}
+		} catch (e) {
+			for (const d of devices) d.is_on = prev.get(d.id) ?? d.is_on; // revert all
+			toasts.push(message(e), 'error');
+		} finally {
+			for (const d of devices) this.busy[d.id] = false;
+		}
 	}
 
 	toggleChild(device: Device, childId: string, on: boolean) {

@@ -4,6 +4,7 @@ import type {
 	Favorites,
 	Group,
 	Hsv,
+	PowerResult,
 	ServerConfig,
 	ServerStatus,
 	Usage
@@ -98,6 +99,13 @@ export const setChildPower = (id: string, childId: string, on: boolean) =>
 	post<Device>(`/devices/${encodeURIComponent(id)}/children/${encodeURIComponent(childId)}/power`, {
 		on
 	});
+
+/** Switch every device in a room at once; reports per-device success/failure. */
+export const setGroupPower = (id: string, on: boolean) =>
+	post<PowerResult>(`/groups/${encodeURIComponent(id)}/power`, { on });
+
+/** Switch every known device at once (e.g. "everything off"). */
+export const setAllPower = (on: boolean) => post<PowerResult>('/power', { on });
 
 /** Persisted energy history (recent power samples + daily totals) for a device. */
 export const getHistory = (id: string, hours = 24, days = 30) =>

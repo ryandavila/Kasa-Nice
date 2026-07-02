@@ -62,6 +62,7 @@ All endpoints are under `/api`; interactive docs live at `http://localhost:8080/
 | `GET`  | `/api/state` | Device list with live state re-read from hardware (polled) |
 | `POST` | `/api/discover` | Discover devices (`{"target": "ip"}` to probe one host) |
 | `POST` | `/api/devices/{id}/power` | `{"on": true\|false}` |
+| `POST` | `/api/power` | Switch every device (`{"on": true\|false}`); returns `{on, succeeded, failed}` |
 | `POST` | `/api/devices/{id}/brightness` | `{"value": 0-100}` |
 | `POST` | `/api/devices/{id}/color` | `{"hex": "#rrggbb"}` or `{"hsv": [h,s,v]}` |
 | `POST` | `/api/devices/{id}/children/{child}/power` | Toggle one outlet on a strip |
@@ -70,6 +71,7 @@ All endpoints are under `/api`; interactive docs live at `http://localhost:8080/
 | `GET`  | `/api/events` | Live device-state stream (Server-Sent Events) |
 | `GET` / `POST` | `/api/groups` | List rooms / create a room (`{"name": "..."}`) |
 | `PATCH` / `DELETE` | `/api/groups/{id}` | Rename or set a room's devices / delete it |
+| `POST` | `/api/groups/{id}/power` | Switch every device in a room (`{"on": true\|false}`); returns `{on, succeeded, failed}` |
 | `GET` / `PUT` | `/api/favorites` | Read / set the starred device ids |
 
 ## Configuration

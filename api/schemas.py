@@ -110,6 +110,18 @@ class PowerRequest(BaseModel):
     on: bool
 
 
+class PowerResult(BaseModel):
+    """Outcome of a fan-out power action across many devices.
+
+    Per-device failures are tolerated, so the batch reports which device ids were
+    switched and which couldn't be (unreachable, or no longer in the registry).
+    """
+
+    on: bool
+    succeeded: list[str] = Field(default_factory=list)
+    failed: list[str] = Field(default_factory=list)
+
+
 class BrightnessRequest(BaseModel):
     value: int = Field(ge=0, le=100)
 

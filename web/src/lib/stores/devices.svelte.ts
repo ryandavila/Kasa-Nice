@@ -250,7 +250,8 @@ class DeviceStore {
 		const child = device.children.find((c) => c.id === childId);
 		const prev = child?.is_on ?? false;
 		if (child) child.is_on = on; // optimistic
-		toasts.push(`${childId} ${on ? 'on' : 'off'}`, on ? 'on' : 'off');
+		// childId is now the stable outlet id (not a name), so toast the alias.
+		toasts.push(`${child?.alias ?? childId} ${on ? 'on' : 'off'}`, on ? 'on' : 'off');
 		return this.run(
 			device.id,
 			() => setChildPower(device.id, childId, on),

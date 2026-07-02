@@ -73,6 +73,32 @@ def test_groups_persist_across_instances(tmp_path):
     assert [g["name"] for g in GroupStore(path).list_groups()] == ["Kitchen"]
 
 
+# ── one-time id migration (IP -> stable id) ──────────────────────────────────
+
+
+def test_migrate_device_id_rewrites_groups_and_favorites(store):
+    g = store.create_group("Living Room")
+    store.update_group(g["id"], device_ids=["10.0.0.5", "10.0.0.6"])
+    store.set_favorites(["10.0.0.5"])
+
+    assert store.migrate_device_id("10.0.0.5", "AABBCCDDEE01") is True
+    assert store.list_groups()[0]["device_ids"] == ["AABBCCDDEE01", "10.0.0.6"]
+    assert store.get_favorites() == ["AABBCCDDEE01"]
+
+
+def test_migrate_device_id_noop_when_old_id_absent(store):
+    store.set_favorites(["10.0.0.6"])
+    assert store.migrate_device_id("10.0.0.5", "AABBCCDDEE01") is False
+    assert store.get_favorites() == ["10.0.0.6"]
+
+
+def test_migrate_device_id_dedupes_when_both_ids_present(store):
+    g = store.create_group("Room")
+    store.update_group(g["id"], device_ids=["AABBCCDDEE01", "10.0.0.5"])
+    store.migrate_device_id("10.0.0.5", "AABBCCDDEE01")
+    assert store.list_groups()[0]["device_ids"] == ["AABBCCDDEE01"]
+
+
 # ── API ─────────────────────────────────────────────────────────────────────
 
 

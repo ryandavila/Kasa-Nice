@@ -113,6 +113,26 @@ class EnergyHistoryStore:
             return []
         return [(day, float(kwh)) for day, kwh in rows]
 
+    def migrate_device_id(self, old_id: str, new_id: str) -> None:
+        """Re-point samples recorded under ``old_id`` to ``new_id``.
+
+        A one-time repair for history recorded when devices were keyed by LAN IP:
+        once a device's stable id is known, its old IP-keyed rows are re-pointed so
+        the energy chart stays continuous across a DHCP change instead of stranding
+        the old history under a dead IP. Best-effort — a failure is logged, never
+        raised, so it can't disrupt the discovery that triggers it.
+        """
+        try:
+            with self._connect() as conn:
+                conn.execute(
+                    "UPDATE samples SET device_id = ? WHERE device_id = ?",
+                    (new_id, old_id),
+                )
+        except sqlite3.Error as e:
+            logger.warning(
+                f"Could not migrate energy history {old_id} -> {new_id}: {e}"
+            )
+
     def prune(self, older_than_ts: int) -> None:
         """Drop samples older than ``older_than_ts`` to cap database growth."""
         try:
@@ -133,20 +153,23 @@ async def run_recorder(registry, store: EnergyHistoryStore, interval: float) -> 
     failure on one device is logged and skipped, the whole cycle is wrapped so a
     bug can't kill the loop, and cancellation propagates for clean shutdown.
     """
-    from .kasa_service import EnergyUnsupportedError
+    from .kasa_service import EnergyUnsupportedError, stable_device_id
 
     while True:
         try:
             for device in registry.all():
+                # Record under the device's stable id (not its LAN IP), so history
+                # survives a DHCP change and lines up with the ids the API serves.
+                device_id = stable_device_id(device)
                 try:
-                    usage = await registry.get_usage(device.host)
+                    usage = await registry.get_usage(device_id)
                 except EnergyUnsupportedError:
                     continue  # no energy meter; nothing to record
                 except Exception as e:  # noqa: BLE001 - one bad device shouldn't stop the cycle
-                    logger.debug(f"Energy sample for {device.host} failed: {e}")
+                    logger.debug(f"Energy sample for {device_id} failed: {e}")
                     continue
                 store.record(
-                    device.host,
+                    device_id,
                     usage.current_power_w,
                     usage.today_kwh,
                     usage.month_kwh,

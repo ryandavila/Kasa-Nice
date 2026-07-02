@@ -6,14 +6,17 @@ Hsv = tuple[int, int, int]
 class ChildPlug(BaseModel):
     """A controllable outlet within a multi-plug power strip."""
 
-    id: str
+    id: str = Field(
+        description="Stable outlet id (python-kasa child device_id); alias is display."
+    )
     alias: str
     is_on: bool
 
 
 class Device(BaseModel):
     id: str = Field(
-        description="Stable identifier (the device host) used in API paths."
+        description="Stable identifier (normalized MAC, or host when unavailable) "
+        "used in API paths; survives the device changing IP."
     )
     alias: str
     host: str

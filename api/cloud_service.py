@@ -214,10 +214,12 @@ class CloudDevice:
         self.mac = _norm_mac(mac)
         self.alias = alias
         self.model = model
-        # host doubles as the public id in API paths (see serialize_device). We
-        # prefer the device's LAN IP when the registry can resolve it from the
-        # MAC, but fall back to the formatted MAC so the device is still
-        # addressable when it isn't.
+        # The public id is the normalized MAC (see ``stable_device_id``), shared
+        # with locally-discovered devices so a device that migrates between local
+        # and cloud control keeps one identity. host is connection/display only:
+        # we prefer the device's LAN IP when the registry can resolve it from the
+        # MAC, and fall back to the formatted MAC so something sensible shows
+        # when it can't.
         self.host = _format_mac(mac)
         self.is_on = False
         self.children: list[CloudChild] = []

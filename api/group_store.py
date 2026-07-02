@@ -2,10 +2,11 @@
 
 Discovery gives a flat list of devices; this lets the user organize them into
 named rooms and star the ones they reach for most. Groups and favorites are a
-pure UI concern, decoupled from discovery — they reference device ids (the
-device ``host``) and may name a device that is currently offline or absent,
-which is fine and intended. Stored in one small JSON file, mirroring the
-tolerant load/save style of ``HostStore``.
+pure UI concern, decoupled from discovery — they reference stable device ids
+(normalized MAC, or host when no MAC is available; see ``stable_device_id``)
+and may name a device that is currently offline or absent, which is fine and
+intended. Stored in one small JSON file, mirroring the tolerant load/save
+style of ``HostStore``.
 """
 
 import json
@@ -101,6 +102,34 @@ class GroupStore:
         data["groups"] = kept
         self._write(data)
         return True
+
+    def migrate_device_id(self, old_id: str, new_id: str) -> bool:
+        """Re-key a device across every room and the favorites list, in place.
+
+        A one-time repair for data written when devices were keyed by LAN IP:
+        wherever a room or the favorites still reference ``old_id`` (the device's
+        former host), swap in ``new_id`` (its stable id) so the room membership and
+        favorite star follow the device across a DHCP IP change. De-duplicates in
+        case both ids were somehow present. Returns whether anything changed, and
+        only writes when it did, so re-running is cheap and harmless.
+        """
+        data = self._read()
+        changed = False
+        for group in data["groups"]:
+            ids = group.get("device_ids", [])
+            if old_id in ids:
+                group["device_ids"] = _dedupe(
+                    [new_id if i == old_id else i for i in ids]
+                )
+                changed = True
+        if old_id in data["favorites"]:
+            data["favorites"] = _dedupe(
+                [new_id if i == old_id else i for i in data["favorites"]]
+            )
+            changed = True
+        if changed:
+            self._write(data)
+        return changed
 
     def get_favorites(self) -> list[str]:
         return self._read()["favorites"]

@@ -2,6 +2,7 @@ export type DeviceType = 'Bulb' | 'Plug' | 'Dimmer' | 'Strip' | 'LightStrip' | '
 
 /** A controllable outlet within a multi-plug power strip. */
 export interface ChildPlug {
+	/** Stable outlet id (the child's device_id); used in API paths, not the alias. */
 	id: string;
 	alias: string;
 	is_on: boolean;
@@ -11,9 +12,10 @@ export interface ChildPlug {
 export type Hsv = [number, number, number];
 
 export interface Device {
-	/** Stable identifier (the device's host) used in API paths. */
+	/** Stable identifier (normalized MAC, or host when unavailable) used in API paths. */
 	id: string;
 	alias: string;
+	/** LAN address for connection/display; may change under DHCP, unlike `id`. */
 	host: string;
 	model: string;
 	device_type: DeviceType;

@@ -68,6 +68,15 @@ def test_prune_drops_old_samples(store):
     assert store.recent_samples("10.0.0.4", 0) == [(now - 100, 8.0)]
 
 
+def test_migrate_device_id_repoints_samples(store):
+    now = int(time.time())
+    store.record("10.0.0.4", 5.0, 0.1, 1.0, ts=now - 100)
+    store.migrate_device_id("10.0.0.4", "AABBCCDDEE01")
+    # History follows the device to its stable id; nothing left under the old IP.
+    assert store.recent_samples("AABBCCDDEE01", 0) == [(now - 100, 5.0)]
+    assert store.recent_samples("10.0.0.4", 0) == []
+
+
 # ── Recorder ────────────────────────────────────────────────────────────────
 
 

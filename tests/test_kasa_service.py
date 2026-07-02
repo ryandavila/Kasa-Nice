@@ -5,6 +5,8 @@ from conftest import FakeChild, FakeDevice, FakeDiscover
 
 from api import kasa_service
 from api.device_store import HostStore
+from api.energy_history import EnergyHistoryStore
+from api.group_store import GroupStore
 from api.kasa_service import (
     DeviceNotFoundError,
     DeviceRegistry,
@@ -17,7 +19,7 @@ from api.kasa_service import (
 
 def test_serialize_plain_plug():
     d = serialize_device(FakeDevice("10.0.0.2", alias="Lamp", is_on=True))
-    assert d.id == "10.0.0.2"
+    assert d.id == "10.0.0.2"  # no MAC on the fake -> falls back to host as id
     assert d.alias == "Lamp"
     assert d.is_on is True
     assert d.is_dimmable is False
@@ -57,6 +59,35 @@ def test_serialize_falls_back_to_host_when_alias_missing():
     dev = FakeDevice("10.0.0.6")
     dev.alias = ""
     assert serialize_device(dev).alias == "10.0.0.6"
+
+
+def test_serialize_uses_normalized_mac_as_id():
+    # A MAC is the durable identity; host stays a separate connection/display field.
+    d = serialize_device(FakeDevice("10.0.0.2", mac="AA:BB:CC:DD:EE:01"))
+    assert d.id == "AABBCCDDEE01"
+    assert d.host == "10.0.0.2"
+
+
+def test_serialize_child_uses_stable_device_id():
+    strip = FakeDevice(
+        "10.0.0.5",
+        type_name="Strip",
+        children=[
+            FakeChild("Outlet 1", is_on=True, device_id="STRIP_00"),
+            FakeChild("Outlet 2", device_id="STRIP_01"),
+        ],
+    )
+    d = serialize_device(strip)
+    assert [c.id for c in d.children] == ["STRIP_00", "STRIP_01"]
+    assert [c.alias for c in d.children] == [
+        "Outlet 1",
+        "Outlet 2",
+    ]  # alias for display
+
+
+def test_serialize_child_falls_back_to_alias_without_device_id():
+    strip = FakeDevice("10.0.0.5", type_name="Strip", children=[FakeChild("Outlet 1")])
+    assert serialize_device(strip).children[0].id == "Outlet 1"
 
 
 # ── get_usage ───────────────────────────────────────────────────────────────
@@ -279,3 +310,130 @@ def test_discover_subnet_finds_caches_and_skips_unreadable(tmp_path, fake_discov
 def test_discover_subnet_rejects_bad_cidr():
     with pytest.raises(ValueError, match="Invalid subnet"):
         asyncio.run(DeviceRegistry().discover_subnet("not-a-subnet"))
+
+
+# ── stable child power matching ──────────────────────────────────────────────
+
+
+def _strip_registry(child: FakeChild) -> DeviceRegistry:
+    reg = DeviceRegistry()
+    reg._devices = {"s": FakeDevice("s", type_name="Strip", children=[child])}
+    return reg
+
+
+def test_set_child_power_matches_stable_id():
+    child = FakeChild("Outlet 1", device_id="STRIP_00")
+    reg = _strip_registry(child)
+    asyncio.run(reg.set_child_power("s", "STRIP_00", True))
+    assert child.is_on is True
+
+
+def test_set_child_power_alias_fallback_for_legacy_ids():
+    # Ids saved by an older client addressed outlets by alias; keep them working.
+    child = FakeChild("Outlet 1", device_id="STRIP_00")
+    reg = _strip_registry(child)
+    asyncio.run(reg.set_child_power("s", "Outlet 1", True))
+    assert child.is_on is True
+
+
+def test_set_child_power_unknown_child_raises():
+    reg = _strip_registry(FakeChild("Outlet 1", device_id="STRIP_00"))
+    with pytest.raises(DeviceNotFoundError):
+        asyncio.run(reg.set_child_power("s", "nope", True))
+
+
+# ── stable MAC-based ids in the registry ─────────────────────────────────────
+
+
+def test_registry_keys_device_by_stable_mac_id(fake_discover):
+    fake_discover.broadcast = {
+        "10.0.0.5": FakeDevice("10.0.0.5", mac="AA:BB:CC:DD:EE:01")
+    }
+    reg = DeviceRegistry()
+    asyncio.run(reg.discover_all())
+
+    assert set(reg._devices) == {"AABBCCDDEE01"}  # keyed by MAC, not host
+    assert reg.get("AABBCCDDEE01").host == "10.0.0.5"  # host kept for connection
+
+
+def test_registry_persists_host_not_stable_id(tmp_path, fake_discover):
+    fake_discover.targets["10.0.0.5"] = {
+        "10.0.0.5": FakeDevice("10.0.0.5", mac="AA:BB:CC:DD:EE:01")
+    }
+    store = HostStore(tmp_path / "hosts.json")
+    reg = DeviceRegistry(store)
+
+    asyncio.run(reg.discover_target("10.0.0.5"))
+
+    # The host store keeps the IP (to re-probe), even though the id is the MAC.
+    assert store.load() == {"10.0.0.5"}
+
+
+def test_rediscovery_at_new_ip_keeps_one_identity(fake_discover):
+    reg = DeviceRegistry()
+    fake_discover.broadcast = {
+        "10.0.0.5": FakeDevice("10.0.0.5", mac="AA:BB:CC:DD:EE:01")
+    }
+    asyncio.run(reg.discover_all())
+    # DHCP hands the same device a new IP; it must update its slot, not fork.
+    fake_discover.broadcast = {
+        "10.0.0.9": FakeDevice("10.0.0.9", mac="AA:BB:CC:DD:EE:01")
+    }
+    asyncio.run(reg.discover_all())
+
+    assert set(reg._devices) == {"AABBCCDDEE01"}
+    assert reg.get("AABBCCDDEE01").host == "10.0.0.9"
+
+
+# ── one-time lazy migration of IP-keyed data ─────────────────────────────────
+
+
+def test_discovery_migrates_ip_keyed_group_and_history(tmp_path, fake_discover):
+    gs = GroupStore(tmp_path / "groups.json")
+    hs = EnergyHistoryStore(tmp_path / "energy.db")
+    room = gs.create_group("Living Room")
+    gs.update_group(room["id"], device_ids=["10.0.0.5"])
+    gs.set_favorites(["10.0.0.5"])
+    hs.record("10.0.0.5", 5.0, 0.1, 1.0)
+
+    fake_discover.broadcast = {
+        "10.0.0.5": FakeDevice("10.0.0.5", mac="AA:BB:CC:DD:EE:01")
+    }
+    reg = DeviceRegistry(group_store=gs, history_store=hs)
+    asyncio.run(reg.discover_all())
+
+    assert gs.list_groups()[0]["device_ids"] == ["AABBCCDDEE01"]  # room follows
+    assert gs.get_favorites() == ["AABBCCDDEE01"]  # star follows
+    assert hs.recent_samples("AABBCCDDEE01", 0)  # history re-keyed
+    assert hs.recent_samples("10.0.0.5", 0) == []  # nothing left under the old IP
+
+
+def test_migration_runs_at_most_once_per_process(tmp_path, fake_discover):
+    gs = GroupStore(tmp_path / "groups.json")
+    hs = EnergyHistoryStore(tmp_path / "energy.db")
+    fake_discover.broadcast = {
+        "10.0.0.5": FakeDevice("10.0.0.5", mac="AA:BB:CC:DD:EE:01")
+    }
+    reg = DeviceRegistry(group_store=gs, history_store=hs)
+    asyncio.run(reg.discover_all())  # migrates (nothing to move yet), sets the guard
+
+    # A stale IP-keyed favorite reappears; the guard means it is NOT touched again.
+    gs.set_favorites(["10.0.0.5"])
+    asyncio.run(reg.discover_all())
+
+    assert gs.get_favorites() == ["10.0.0.5"]
+
+
+def test_migration_never_crashes_discovery(tmp_path, fake_discover):
+    class BoomStore:
+        def migrate_device_id(self, *_a):
+            raise RuntimeError("store on fire")
+
+    fake_discover.broadcast = {
+        "10.0.0.5": FakeDevice("10.0.0.5", mac="AA:BB:CC:DD:EE:01")
+    }
+    reg = DeviceRegistry(group_store=BoomStore(), history_store=BoomStore())
+
+    asyncio.run(reg.discover_all())  # must not raise despite the failing stores
+
+    assert reg.get("AABBCCDDEE01").host == "10.0.0.5"

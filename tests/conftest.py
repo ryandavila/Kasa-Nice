@@ -35,9 +35,13 @@ class FakeEnergy:
 
 
 class FakeChild:
-    def __init__(self, alias: str, is_on: bool = False):
+    def __init__(self, alias: str, is_on: bool = False, device_id: str | None = None):
         self.alias = alias
         self.is_on = is_on
+        # python-kasa child devices carry a stable ``device_id`` (parent id + slot).
+        # Optional so tests can also cover the alias fallback when it's absent.
+        if device_id is not None:
+            self.device_id = device_id
 
     async def turn_on(self) -> None:
         self.is_on = True
@@ -67,9 +71,14 @@ class FakeDevice:
         has_energy: bool = False,
         children: list[FakeChild] | None = None,
         fail_update: bool = False,
+        mac: str | None = None,
     ):
         self.host = host
         self._fail_update = fail_update
+        # Optional so most tests keep host-as-id (the MAC-absent fallback); tests
+        # exercising stable ids pass a MAC to get MAC-based keying.
+        if mac is not None:
+            self.mac = mac
         self.alias = alias
         self.model = model
         self.device_type = FakeDeviceType(type_name)

@@ -511,7 +511,8 @@ def test_attach_cloud_merges_into_all_and_get(monkeypatch):
 
     assert attached == [cloud]
     assert cloud in reg.all()
-    assert reg.get("AA:BB:CC:DD:EE:01") is cloud
+    # Keyed by the stable (normalized-MAC) id, not the host, matching local devices.
+    assert reg.get("AABBCCDDEE01") is cloud
 
 
 def test_attach_cloud_noop_when_disabled():

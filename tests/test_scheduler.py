@@ -1,6 +1,8 @@
 import asyncio
 import contextlib
 import datetime
+import os
+import time
 from unittest.mock import AsyncMock
 
 import pytest
@@ -104,6 +106,46 @@ def test_sun_rule_respects_weekday():
     other_day = (fire.weekday() + 1) % 7
     rule = _rule(kind="sunrise", days=[other_day], time=None)
     assert scheduler.rule_due_at(rule, fire, location=NYC) is False
+
+
+@contextlib.contextmanager
+def _server_tz(name: str):
+    """Run the block as if the server's local zone were ``name`` (POSIX TZ)."""
+    prev = os.environ.get("TZ")
+    os.environ["TZ"] = name
+    time.tzset()
+    try:
+        yield
+    finally:
+        if prev is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = prev
+        time.tzset()
+
+
+def test_sun_rule_fires_on_utc_server():
+    """Regression: a UTC server (CI, and the Docker default) still fires NYC sunset.
+
+    Summer NYC sunset is past midnight UTC — a different calendar date than the
+    event's — which the old date-string comparison silently never matched.
+    """
+    with _server_tz("UTC"):
+        fire = _sun_local("sunset", datetime.date(2024, 6, 21))
+        rule = _rule(kind="sunset", days=[fire.weekday()], time=None)
+        assert scheduler.rule_due_at(rule, fire, location=NYC) is True
+        assert (
+            scheduler.rule_due_at(
+                rule, fire + datetime.timedelta(minutes=1), location=NYC
+            )
+            is False
+        )
+
+        early = fire - datetime.timedelta(minutes=30)
+        rule = _rule(
+            kind="sunset", days=[early.weekday()], time=None, offset_minutes=-30
+        )
+        assert scheduler.rule_due_at(rule, early, location=NYC) is True
 
 
 # ── One-shot (once) rules ─────────────────────────────────────────────────────

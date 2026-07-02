@@ -56,28 +56,28 @@ def _local_now() -> datetime.datetime:
     return datetime.datetime.now().astimezone()
 
 
-def _sun_fire_hhmm(
+def _sun_fires_at(
     kind: str, rule: dict, minute: datetime.datetime, location: Location
-) -> str | None:
-    """Local 'YYYY-MM-DDTHH:MM' a sun rule fires at on ``minute``'s date.
+) -> bool:
+    """Whether ``location``'s sunrise/sunset (+offset) lands in local ``minute``.
 
-    Computes today's sunrise/sunset for ``location``, converts to ``minute``'s
-    local zone, applies ``offset_minutes``, and truncates to the minute. Returns
-    None when location is unset or the sun doesn't cross the horizon that day
-    (polar), so the rule simply doesn't fire.
+    Compared as UTC instants, so the server's timezone drops out: the offset is
+    whole minutes, so firing means ``truncate(event) == minute - offset``.
+    ``solar``'s event for date D falls within (D 00:00 UTC - 13h, +37h) at any
+    longitude, so only four UTC dates can hit the target minute. False when
+    location is unset or the sun doesn't cross the horizon that day (polar).
     """
     if location is None:
-        return None
+        return False
     lat, lon = location
-    event_utc = (solar.sunrise if kind == "sunrise" else solar.sunset)(
-        minute.date(), lat, lon
-    )
-    if event_utc is None:
-        return None
-    local = event_utc.astimezone(minute.tzinfo) + datetime.timedelta(
-        minutes=rule.get("offset_minutes", 0) or 0
-    )
-    return local.strftime("%Y-%m-%dT%H:%M")
+    fn = solar.sunrise if kind == "sunrise" else solar.sunset
+    offset = datetime.timedelta(minutes=rule.get("offset_minutes", 0) or 0)
+    target = (minute - offset).astimezone(datetime.UTC)
+    for delta in range(-2, 2):
+        event = fn(target.date() + datetime.timedelta(days=delta), lat, lon)
+        if event and event.replace(second=0, microsecond=0) == target:
+            return True
+    return False
 
 
 def _once_target_hhmm(rule: dict) -> str | None:
@@ -122,9 +122,7 @@ def rule_due_at(
     if kind == "fixed_time":
         return rule.get("time") == minute.strftime("%H:%M")
     # sunrise / sunset
-    return _sun_fire_hhmm(kind, rule, minute, location) == minute.strftime(
-        "%Y-%m-%dT%H:%M"
-    )
+    return _sun_fires_at(kind, rule, minute, location)
 
 
 def due_rules(

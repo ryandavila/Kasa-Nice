@@ -103,6 +103,12 @@ class Settings(BaseSettings):
     kasa_cloud_app_version: str = _DEFAULT_APP_VERSION
     kasa_cloud_terminal_uuid: str | None = None
 
+    # ── Test-only seams ──────────────────────────────────────────────────────
+    # Serve in-process fake devices instead of scanning the network, so the
+    # browser end-to-end smoke test can exercise real API wiring with no Kasa
+    # hardware or credentials. Off by default; production startup is untouched.
+    kasa_fake_devices: bool = False
+
     @property
     def cloud_models(self) -> tuple[str, ...]:
         """``kasa_cloud_models`` split into a tuple, dropping blank entries."""
@@ -181,7 +187,7 @@ class Settings(BaseSettings):
             logger.warning(f"Ignoring invalid KASA_PORT={value!r}; using 8080")
             return _DEFAULT_PORT
 
-    @field_validator("kasa_cloud_fallback", mode="before")
+    @field_validator("kasa_cloud_fallback", "kasa_fake_devices", mode="before")
     @classmethod
     def _parse_cloud_fallback(cls, value: object) -> bool:
         # Preserve the exact historical truthy set: only these strings enable the

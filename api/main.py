@@ -31,18 +31,32 @@ WEB_BUILD_DIR = Path(__file__).resolve().parent.parent / "web" / "build"
 async def lifespan(app: FastAPI):
     setup_logging()
     logger.info("Starting Kasa-Nice API")
-    # Discovery (broadcast + subnet sweep + cloud) can take many seconds, so run
-    # it in the background and let the API serve immediately. The frontend watches
-    # registry.discovering (via /api/status) and surfaces devices as they appear,
-    # instead of blocking on an empty list at startup.
-    discovery = asyncio.create_task(registry.run_startup_discovery())
-    # Sample metered devices on an interval and persist the readings, so energy
-    # history survives beyond what each device remembers. Runs alongside the API.
-    recorder = asyncio.create_task(
-        run_recorder(registry, history, load_sample_interval())
-    )
+    # Test-only seam, enabled via KASA_FAKE_DEVICES (see Settings.kasa_fake_devices).
+    if get_settings().kasa_fake_devices:
+        # Test-only seam: seed the registry with fakes instead of scanning the
+        # network. One of them flips its state on every read, so the SSE stream's
+        # periodic re-reads surface a server-initiated change the browser never
+        # triggered — the live-update case the smoke test asserts. The energy
+        # recorder is skipped to keep the fake run hermetic (no history writes).
+        from .testing.fake_devices import seed_registry
+
+        logger.warning("KASA_FAKE_DEVICES set; serving in-process fake devices")
+        seed_registry(registry)
+        tasks: tuple[asyncio.Task, ...] = ()
+    else:
+        # Discovery (broadcast + subnet sweep + cloud) can take many seconds, so
+        # run it in the background and let the API serve immediately. The frontend
+        # watches registry.discovering (via /api/status) and surfaces devices as
+        # they appear, instead of blocking on an empty list at startup.
+        discovery = asyncio.create_task(registry.run_startup_discovery())
+        # Sample metered devices on an interval and persist the readings, so
+        # energy history survives beyond what each device remembers.
+        recorder = asyncio.create_task(
+            run_recorder(registry, history, load_sample_interval())
+        )
+        tasks = (discovery, recorder)
     yield
-    for task in (discovery, recorder):
+    for task in tasks:
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await task

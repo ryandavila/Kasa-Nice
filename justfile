@@ -65,6 +65,31 @@ test:
 web-test:
     cd web && bun run test:run
 
+# Run the Playwright end-to-end smoke test against the production-style server.
+# Builds the SPA, starts the API serving it with in-process fake devices (no
+# hardware/credentials needed), waits for it, runs the test, and always tears the
+# server down. Run `cd web && bunx playwright install chromium` once beforehand.
+e2e: web-build
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # An uncommon port so we don't collide with (and silently test against) a real
+    # Kasa-Nice instance a developer may have running on the usual 8080.
+    port=8199
+    base="http://127.0.0.1:${port}"
+    KASA_FAKE_DEVICES=1 KASA_HOST=127.0.0.1 KASA_PORT="$port" uv run python -m api.main &
+    server_pid=$!
+    # Kill the server on any exit (success, failure, or interrupt) so it never leaks.
+    trap 'kill "$server_pid" 2>/dev/null || true; wait "$server_pid" 2>/dev/null || true' EXIT
+    # Wait for OUR server to accept connections; fail loudly if it never binds
+    # (e.g. the port was taken) rather than testing against something else.
+    for _ in $(seq 1 60); do
+        if curl -sf "${base}/api/status" >/dev/null 2>&1; then ready=1; break; fi
+        if ! kill -0 "$server_pid" 2>/dev/null; then echo "e2e server exited early"; exit 1; fi
+        sleep 0.5
+    done
+    if [ "${ready:-0}" != "1" ]; then echo "e2e server did not become ready on ${base}"; exit 1; fi
+    cd web && E2E_BASE_URL="$base" bunx playwright test
+
 # Format, lint, type-check, and test everything
 fix: format lint typecheck test web-test
     @echo "All checks passed."

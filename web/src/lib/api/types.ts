@@ -336,3 +336,32 @@ export interface Alert {
 export interface AlertThresholds {
 	thresholds: Record<string, number>;
 }
+
+// ── Backup & restore ─────────────────────────────────────────────────────────
+
+/** A persisted known-device host plus its optional last-known identity snapshot. */
+export interface KnownDevice {
+	host: string;
+	/** Raw serialized `Device`, or null if this host was never successfully read. */
+	snapshot: Record<string, unknown> | null;
+}
+
+/**
+ * Every JSON-persisted store as one versioned document — see `GET /api/backup`
+ * and `POST /api/backup/restore`. Deliberately excludes the energy-history
+ * SQLite database (downloaded separately, `GET /api/backup/energy.db`) and the
+ * in-memory-only alert ring buffer.
+ */
+export interface BackupDocument {
+	backup_version: number;
+	/** ISO 8601 UTC timestamp the backup was generated. */
+	created_at: string;
+	/** kasa-nice version that produced this backup. */
+	app_version: string;
+	groups: Group[];
+	favorites: string[];
+	scenes: Scene[];
+	schedules: Schedule[];
+	alert_thresholds: Record<string, number>;
+	known_devices: KnownDevice[];
+}

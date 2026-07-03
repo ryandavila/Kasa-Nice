@@ -9,7 +9,9 @@ import {
 	setFavorites,
 	setGroupPower,
 	setAllPower,
-	getEnergySummary
+	getEnergySummary,
+	getBackup,
+	restoreBackup
 } from './client';
 
 function mockFetch(impl: (url: string, init?: RequestInit) => unknown) {
@@ -145,5 +147,42 @@ describe('endpoint shapes', () => {
 		expect(url).toBe('/api/power');
 		expect(init).toMatchObject({ method: 'POST', body: JSON.stringify({ on: false }) });
 		expect(result).toEqual({ on: false, succeeded: ['a'], failed: [] });
+	});
+
+	it('getBackup GETs the backup document path', async () => {
+		const body = {
+			backup_version: 1,
+			created_at: '2026-01-01T00:00:00Z',
+			app_version: '1.1.0',
+			groups: [],
+			favorites: [],
+			scenes: [],
+			schedules: [],
+			alert_thresholds: {},
+			known_devices: []
+		};
+		const fetchFn = mockFetch(() => ok(body));
+		const result = await getBackup();
+		expect(fetchFn.mock.calls[0][0]).toBe('/api/backup');
+		expect(result).toEqual(body);
+	});
+
+	it('restoreBackup POSTs the document to the restore path', async () => {
+		const doc = {
+			backup_version: 1,
+			created_at: '2026-01-01T00:00:00Z',
+			app_version: '1.1.0',
+			groups: [],
+			favorites: [],
+			scenes: [],
+			schedules: [],
+			alert_thresholds: {},
+			known_devices: []
+		};
+		const fetchFn = mockFetch(() => ok(doc));
+		await restoreBackup(doc);
+		const [url, init] = fetchFn.mock.calls[0];
+		expect(url).toBe('/api/backup/restore');
+		expect(init).toMatchObject({ method: 'POST', body: JSON.stringify(doc) });
 	});
 });

@@ -611,3 +611,69 @@ class AlertThresholds(BaseModel):
     """
 
     thresholds: dict[str, float] = Field(default_factory=dict)
+
+
+# ── Backup & restore ────────────────────────────────────────────────────────
+
+# Bumped whenever the backup document's shape changes incompatibly. Restore
+# rejects any other value (including a newer one this build doesn't understand
+# yet) rather than guessing at a migration, so a bad restore fails loudly at the
+# door instead of silently writing a half-understood document.
+CURRENT_BACKUP_VERSION = 1
+
+
+class KnownDevice(BaseModel):
+    """A persisted known-device host plus its optional last-known identity.
+
+    Mirrors ``HostStore``/``DeviceSnapshotStore``, which are two separate files
+    keyed by host; folded into one row per host here since a backup consumer
+    only cares about "this host, and what we last knew about it" as a unit.
+    ``snapshot`` is the raw stored dict (already a serialized ``Device``, see
+    ``DeviceRegistry._snapshot_of``) — re-validated as a ``Device`` by the
+    restore route, not by this model, so a bad snapshot fails the whole restore
+    with a clear error rather than silently dropping just that entry.
+    """
+
+    host: str
+    snapshot: dict | None = None
+
+
+class BackupDocument(BaseModel):
+    """The full contents of every JSON-persisted store, as one downloadable file.
+
+    Deliberately excludes the energy-history SQLite database (see
+    ``GET /api/backup/energy.db``) — it's large, append-only, and streamed
+    separately with a consistent snapshot rather than loaded into a JSON blob.
+    Also excludes the alert ring buffer (in-memory only, never persisted, so
+    there is nothing durable to back up).
+
+    Restore validates a whole document through this model FIRST — before
+    touching any store — so a malformed or unknown-version backup is rejected
+    with no partial writes; see ``POST /api/backup/restore``.
+    """
+
+    backup_version: int
+    created_at: datetime.datetime = Field(
+        description="UTC timestamp the backup was generated, for the user's reference."
+    )
+    app_version: str = Field(description="kasa-nice version that produced this backup.")
+
+    groups: list[Group] = Field(default_factory=list)
+    favorites: list[str] = Field(default_factory=list)
+    scenes: list[Scene] = Field(default_factory=list)
+    schedules: list[Schedule] = Field(default_factory=list)
+    alert_thresholds: dict[str, float] = Field(default_factory=dict)
+    known_devices: list[KnownDevice] = Field(default_factory=list)
+
+    @field_validator("backup_version")
+    @classmethod
+    def _known_version(cls, v: int) -> int:
+        # A version this build doesn't recognise (older OR newer) is rejected
+        # outright rather than guessed at: silently reinterpreting a foreign
+        # shape risks writing subtly-wrong data to every store at once.
+        if v != CURRENT_BACKUP_VERSION:
+            raise ValueError(
+                f"unsupported backup_version {v!r}; this server understands "
+                f"version {CURRENT_BACKUP_VERSION}"
+            )
+        return v

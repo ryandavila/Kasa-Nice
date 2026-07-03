@@ -126,6 +126,17 @@ class GroupStore(JsonDocumentStore):
         self._write(data)
         return data["favorites"]
 
+    def replace_all(self, groups: list[dict], favorites: list[str]) -> None:
+        """Overwrite every room and the favorites list in one atomic write.
+
+        Used by backup restore: both halves of this store's document must land
+        together (or not at all) so a restore can never leave rooms referencing
+        one backup's ids alongside another's favorites.
+        """
+        self._write(
+            {"groups": groups, "favorites": _dedupe([str(f) for f in favorites])}
+        )
+
 
 # Module-level singleton. Lives at KASA_GROUPS_FILE (default ./data/groups.json);
 # mount that path as a volume to keep rooms and favorites.

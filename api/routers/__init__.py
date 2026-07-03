@@ -8,6 +8,7 @@ module. ``api.main`` includes each router in turn.
 
 from ._helpers import _validated_rows
 from .alerts import router as alerts_router
+from .backup import router as backup_router
 from .devices import router as devices_router
 from .energy import router as energy_router
 from .groups import router as groups_router
@@ -17,6 +18,7 @@ from .schedules import router as schedules_router
 __all__ = [
     "_validated_rows",
     "alerts_router",
+    "backup_router",
     "devices_router",
     "energy_router",
     "groups_router",

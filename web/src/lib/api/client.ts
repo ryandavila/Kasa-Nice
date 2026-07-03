@@ -1,6 +1,7 @@
 import type {
 	Alert,
 	AlertThresholds,
+	BackupDocument,
 	Device,
 	EnergyHistory,
 	EnergyInsights,
@@ -208,3 +209,53 @@ export const deleteScene = (id: string) => del(`/scenes/${encodeURIComponent(id)
 /** Apply a scene; reports which devices reached their saved state and which failed. */
 export const applyScene = (id: string) =>
 	post<SceneApplyResult>(`/scenes/${encodeURIComponent(id)}/apply`);
+
+// ── Backup & restore ──────────────────────────────────────────────────────────
+
+/** Fetch the current backup document (every JSON store, one versioned object). */
+export const getBackup = () => request<BackupDocument>('/backup');
+
+/**
+ * Replace every JSON store's contents from a backup document. The server
+ * validates the whole payload before writing anything, so a bad file 4xxs with
+ * no partial effect — see the confirmation step in `SettingsPanel`.
+ */
+export const restoreBackup = (doc: BackupDocument) => post<BackupDocument>('/backup/restore', doc);
+
+/**
+ * Trigger a browser download of a URL under `/api` by creating a throwaway
+ * `<a download>` and clicking it — the standard DOM technique for saving a
+ * fetched blob without navigating away from the SPA. Shared by the backup JSON
+ * and energy-history DB downloads, which otherwise differ only in URL/filename.
+ */
+async function downloadFile(path: string, filename: string): Promise<void> {
+	const res = await fetch(`${BASE}${path}`);
+	if (!res.ok) {
+		let detail = res.statusText;
+		try {
+			detail = ((await res.json()).detail as string) ?? detail;
+		} catch {
+			// non-JSON error body; fall back to status text
+		}
+		throw new ApiError(res.status, detail);
+	}
+	const blob = await res.blob();
+	const url = URL.createObjectURL(blob);
+	try {
+		const a = document.createElement('a');
+		a.href = url;
+		a.download = filename;
+		a.click();
+	} finally {
+		// Revoke after the click has had a chance to start the download; an
+		// immediate revoke can race the browser's own read of the blob URL.
+		setTimeout(() => URL.revokeObjectURL(url), 1000);
+	}
+}
+
+/** Download the backup document as a file (browser save dialog / downloads folder). */
+export const downloadBackupFile = () => downloadFile('/backup', 'kasa-nice-backup.json');
+
+/** Download a consistent snapshot of the energy-history SQLite database. */
+export const downloadEnergyDb = () =>
+	downloadFile('/backup/energy.db', 'kasa-nice-energy-history.db');

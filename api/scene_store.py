@@ -87,6 +87,10 @@ class SceneStore(JsonDocumentStore):
         self._write(data)
         return True
 
+    def replace_all(self, scenes: list[dict]) -> None:
+        """Overwrite every scene in one atomic write. Used by backup restore."""
+        self._write({"scenes": scenes})
+
 
 # Module-level singleton. Lives at KASA_SCENES_FILE (default ./data/scenes.json);
 # mount that path as a volume to keep scenes across rebuilds.

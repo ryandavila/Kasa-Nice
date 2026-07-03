@@ -23,6 +23,7 @@ from .kasa_service import registry
 from .logging_config import get_logger, setup_logging
 from .routers import (
     alerts_router,
+    backup_router,
     devices_router,
     energy_router,
     groups_router,
@@ -134,6 +135,7 @@ def create_app() -> FastAPI:
     app.include_router(scenes_router)
     app.include_router(schedules_router)
     app.include_router(alerts_router)
+    app.include_router(backup_router)
     app.include_router(events_router)
 
     if WEB_BUILD_DIR.is_dir():

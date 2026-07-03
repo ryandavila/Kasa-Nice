@@ -12,6 +12,7 @@
 	import SchedulesView from '$lib/components/SchedulesView.svelte';
 	import ThemeToggle from '$lib/components/ThemeToggle.svelte';
 	import AlertsBell from '$lib/components/AlertsBell.svelte';
+	import SettingsPanel from '$lib/components/SettingsPanel.svelte';
 
 	type Tab = 'devices' | 'energy' | 'scenes' | 'schedules' | 'discovery';
 	let tab = $state<Tab>('devices');
@@ -125,6 +126,7 @@
 				<span class="hidden sm:inline">Rediscover</span>
 			</button>
 			<AlertsBell />
+			<SettingsPanel />
 			<ThemeToggle />
 		</div>
 	</header>

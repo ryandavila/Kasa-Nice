@@ -89,6 +89,10 @@ class ScheduleStore(JsonDocumentStore):
         """
         return self.update_rule(rule_id, {"last_fired": {"ts": ts, "result": result}})
 
+    def replace_all(self, rules: list[dict]) -> None:
+        """Overwrite every rule in one atomic write. Used by backup restore."""
+        self._write({"schedules": rules})
+
 
 # Module-level singleton. Lives at KASA_SCHEDULES_FILE (default
 # ./data/schedules.json); mount that path as a volume to keep schedule rules.

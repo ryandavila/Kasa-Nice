@@ -559,6 +559,46 @@ class DeviceRegistry:
             raise DeviceNotFoundError(device_id)
         return device
 
+    def known_devices_export(self) -> tuple[list[str], dict[str, dict]]:
+        """Persisted known hosts and identity snapshots, for backup.
+
+        Reads straight from the durable stores (not live device objects, which
+        aren't backup data), so this reflects exactly what a restart would
+        re-probe. Empty when no stores are wired in (e.g. a test registry).
+        """
+        hosts = sorted(self._store.load()) if self._store is not None else []
+        snapshots = (
+            self._snapshot_store.load() if self._snapshot_store is not None else {}
+        )
+        return hosts, snapshots
+
+    def restore_known_devices(
+        self, hosts: list[str], snapshots: dict[str, dict]
+    ) -> None:
+        """Replace the persisted known-hosts/snapshot files from a backup.
+
+        Deliberately does NOT touch live device connections (``_devices`` /
+        ``_cloud_devices``) — those are real network sessions a JSON restore has
+        no business tearing down. It writes through to disk and refreshes the
+        in-memory snapshot cache (identity data only, safe to swap), so restored
+        offline devices show up as grayed cards immediately; restored *hosts* are
+        re-probed the next discovery sweep like any persisted host, not this
+        instant, matching how the store is normally populated. No-op for a
+        registry with no stores wired in (e.g. under ``KASA_FAKE_DEVICES``).
+        """
+        if self._store is not None:
+            self._store.save(set(hosts))
+        if self._snapshot_store is not None:
+            self._snapshot_store.save(snapshots)
+            self._snapshots = {}
+            for host, raw in snapshots.items():
+                try:
+                    self._snapshots[host] = Device(**raw)
+                except Exception as e:  # noqa: BLE001 - a bad record must not break restore
+                    logger.warning(
+                        f"Ignoring unreadable restored snapshot for {host}: {e}"
+                    )
+
     async def attach_cloud(self) -> list[KasaDevice]:
         """Discover and cache devices that are only controllable via the cloud.
 

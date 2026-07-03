@@ -26,6 +26,9 @@ A **FastAPI** backend ([`api/`](api/)) talks to your devices via
   than a per-device wattage threshold, in-app (a header bell) and via an optional
   webhook
 - 🔌 **Persistent discovery** — devices added by IP survive restarts
+- 💾 **Backup & restore** — download everything the server persists as one JSON
+  file, restore it later with a confirmation step, and separately download the
+  raw energy-history database
 - 🌗 **Light/dark theme** with an instant, no-flash toggle
 - 🐳 **Docker-ready** — one multi-stage image builds the frontend and serves it
   from the API on a single port
@@ -89,6 +92,9 @@ All endpoints are under `/api`; interactive docs live at `http://localhost:8080/
 | `POST` | `/api/scenes/{id}/apply` | Apply a scene; returns `{succeeded, failed}` |
 | `GET`  | `/api/alerts/recent` | Recent alerts from the in-memory ring buffer, newest first (see [Alerts](#alerts)) |
 | `GET` / `PUT` | `/api/alerts/thresholds` | Read / full-replace the per-device power-draw thresholds (`{"thresholds": {"<id>": watts}}`) |
+| `GET`  | `/api/backup` | Download every JSON store as one versioned document (see [Backup & restore](#backup--restore)) |
+| `POST` | `/api/backup/restore` | Replace every JSON store's contents from a backup document; validated whole, no partial writes |
+| `GET`  | `/api/backup/energy.db` | Download a consistent snapshot of the energy-history SQLite database |
 
 ## Configuration
 
@@ -248,6 +254,33 @@ the same on demand.
 
 In Docker, `./logs` and `./data` are mounted as volumes so logs and the known
 device list survive rebuilds.
+
+### Backup & restore
+
+The **Settings** panel (gear icon in the header) lets you download and restore
+everything the server persists as JSON: rooms, favorites, scenes, schedules,
+alert thresholds, and known devices (including the last-known identity of any
+device that's gone offline). It's one versioned document — `GET /api/backup` —
+tagged with a `backup_version` and the server's `app_version` for reference.
+
+**Restoring is a two-step, destructive operation.** Picking a file parses it
+client-side and shows a summary of what it contains (counts per section) before
+anything is sent to the server; only after you confirm does the client
+`POST` it to `/api/backup/restore`, which **replaces** the current contents of
+every store. The server independently re-validates the entire document against
+its schemas first — including `backup_version` — and rejects the whole request
+with a 4xx (no partial writes) if anything is invalid or the version is one
+this build doesn't understand. A successful restore pushes an immediate update
+over the SSE stream so every connected client refreshes.
+
+The energy-history database is **not** part of this JSON document — it's
+downloaded separately via `GET /api/backup/energy.db` (also from the Settings
+panel) since it can be much larger and is a different format (SQLite, not
+JSON). That endpoint streams a consistent point-in-time snapshot (via SQLite's
+own online backup API) so a download can't catch the file mid-write while the
+energy recorder is running. There's currently no restore path for it — recorded
+history is meant to be downloaded for your own analysis/archival, not
+round-tripped back into the server.
 
 ## Project Structure
 

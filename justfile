@@ -78,9 +78,10 @@ test:
 web-test:
     cd web && bun run test:run
 
-# Run the Playwright end-to-end smoke test against the production-style server.
+# Run the Playwright end-to-end suite against the production-style server.
 # Builds the SPA, starts the API serving it with in-process fake devices (no
-# hardware/credentials needed), waits for it, runs the test, and always tears the
+# hardware/credentials needed), waits for it, runs every spec except
+# screenshots.spec.ts (see the `screenshots` recipe), and always tears the
 # server down.
 e2e: web-build
     #!/usr/bin/env bash
@@ -92,7 +93,13 @@ e2e: web-build
     # Kasa-Nice instance a developer may have running on the usual 8080.
     port=8199
     base="http://127.0.0.1:${port}"
-    KASA_FAKE_DEVICES=1 KASA_HOST=127.0.0.1 KASA_PORT="$port" uv run python -m api.main &
+    # The alerts spec needs a real energy-sample + alert-evaluator cycle against
+    # the fake registry; both intervals are floored at 10s (see api/config.py),
+    # so set them there to keep that spec's wait fast rather than the ~30-60s
+    # production defaults.
+    KASA_FAKE_DEVICES=1 KASA_HOST=127.0.0.1 KASA_PORT="$port" \
+        KASA_ENERGY_SAMPLE_INTERVAL=10 KASA_ALERT_INTERVAL=10 \
+        uv run python -m api.main &
     server_pid=$!
     # Kill the server on any exit (success, failure, or interrupt) so it never leaks.
     trap 'kill "$server_pid" 2>/dev/null || true; wait "$server_pid" 2>/dev/null || true' EXIT
@@ -104,7 +111,31 @@ e2e: web-build
         sleep 0.5
     done
     if [ "${ready:-0}" != "1" ]; then echo "e2e server did not become ready on ${base}"; exit 1; fi
-    cd web && E2E_BASE_URL="$base" bunx playwright test
+    # --project=chromium: Playwright runs every project with no filter, and the
+    # `screenshots` project (screenshots.spec.ts) must never join this pass/fail run.
+    cd web && E2E_BASE_URL="$base" bunx playwright test --project=chromium
+
+# Regenerate the README hero screenshots (docs/screenshots/*.png). Boots the
+# same fake-device server as `just e2e` but runs only screenshots.spec.ts (via
+# the `screenshots` Playwright project), so it never affects e2e's pass/fail
+# signal. Commit the resulting PNGs.
+screenshots: web-build
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mkdir -p docs/screenshots
+    (cd web && bunx playwright install chromium)
+    port=8198
+    base="http://127.0.0.1:${port}"
+    KASA_FAKE_DEVICES=1 KASA_HOST=127.0.0.1 KASA_PORT="$port" uv run python -m api.main &
+    server_pid=$!
+    trap 'kill "$server_pid" 2>/dev/null || true; wait "$server_pid" 2>/dev/null || true' EXIT
+    for _ in $(seq 1 60); do
+        if curl -sf "${base}/api/status" >/dev/null 2>&1; then ready=1; break; fi
+        if ! kill -0 "$server_pid" 2>/dev/null; then echo "screenshots server exited early"; exit 1; fi
+        sleep 0.5
+    done
+    if [ "${ready:-0}" != "1" ]; then echo "screenshots server did not become ready on ${base}"; exit 1; fi
+    cd web && E2E_BASE_URL="$base" bunx playwright test --project=screenshots
 
 # Format, lint, type-check, and test everything
 fix: format lint typecheck test web-test

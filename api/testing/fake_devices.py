@@ -31,12 +31,15 @@ class FakeLight:
 
 
 class FakeEnergy:
-    current_consumption = 12.5
     consumption_today = 0.3
     consumption_this_month = 4.2
     voltage = 120.0
 
-    def __init__(self) -> None:
+    def __init__(self, current_consumption: float = 12.5) -> None:
+        # Instance (not class) attribute so each fake device can carry its own
+        # wattage — the alerts e2e spec needs a device whose draw it controls
+        # independently of every other metered fake.
+        self.current_consumption = current_consumption
         # Count stats-table fetches so tests can assert the recorder's snapshot
         # read never triggers them — only /usage should.
         self.daily_stats_calls = 0
@@ -100,6 +103,7 @@ class FakeDevice:
         is_color: bool = False,
         is_dimmable: bool = False,
         has_energy: bool = False,
+        current_consumption: float = 12.5,
         children: list[FakeChild] | None = None,
         fail_update: bool = False,
         mac: str | None = None,
@@ -125,7 +129,7 @@ class FakeDevice:
         if is_dimmable or is_color:
             self.modules[Module.Light] = FakeLight()
         if has_energy:
-            self.modules[Module.Energy] = FakeEnergy()
+            self.modules[Module.Energy] = FakeEnergy(current_consumption)
         self.update_count = 0
         # Real devices expose set_alias, the cloud façade doesn't;
         # ``renamable=False`` models a cloud-only device for the rejection tests.
@@ -176,8 +180,10 @@ class FakeDiscover:
 def _sample_devices() -> list[FakeDevice]:
     """A small, varied device set for the ``KASA_FAKE_DEVICES`` seam.
 
-    A plain plug to toggle by hand, a colour bulb for variety, and a plug that
-    flips its own state on every read to drive the SSE live-update assertion.
+    A plain plug to toggle by hand, a colour bulb for variety, a plug that flips
+    its own state on every read to drive the SSE live-update assertion, and two
+    metered devices (realistic names/wattages) for the energy screenshots and the
+    alerts e2e spec's power-threshold scenario.
     """
     return [
         FakeDevice("10.0.0.11", alias="Living Room Lamp", model="HS100"),
@@ -195,6 +201,26 @@ def _sample_devices() -> list[FakeDevice]:
             alias="Porch Light",
             model="HS100",
             toggles_on_update=True,
+        ),
+        FakeDevice(
+            "10.0.0.14",
+            alias="Office Desk",
+            model="KP125",
+            is_on=True,
+            has_energy=True,
+            current_consumption=42.0,
+        ),
+        # Steady, moderate draw so the alerts spec can set a threshold BELOW it
+        # and observe a clean rising-edge "power_exceeded" alert on the very next
+        # evaluator cycle, with no need to flip the device's wattage mid-test.
+        FakeDevice(
+            "10.0.0.15",
+            alias="Kitchen Strip",
+            model="KP303",
+            type_name="Strip",
+            is_on=True,
+            has_energy=True,
+            current_consumption=150.0,
         ),
     ]
 

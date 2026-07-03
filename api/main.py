@@ -53,13 +53,32 @@ async def lifespan(app: FastAPI):
     if get_settings().kasa_fake_devices:
         # Test-only seam: seed fakes instead of scanning. One flips its state on
         # every read, so the SSE stream surfaces a server-initiated change (the
-        # smoke test's live-update case). Recorder and scheduler are skipped to
-        # keep the fake run hermetic (no history/schedule writes).
+        # smoke test's live-update case). The scheduler is skipped to keep the
+        # fake run hermetic (no schedule writes/firings against fake devices).
+        # The recorder and alert evaluator DO run here (against the fake
+        # registry, on the same configurable intervals as a real run) because the
+        # alerts e2e spec needs a real power sample and a real evaluator cycle to
+        # observe a threshold-crossing alert end to end.
         from .testing.fake_devices import seed_registry
 
         logger.warning("KASA_FAKE_DEVICES set; serving in-process fake devices")
         seed_registry(registry)
-        tasks: tuple[asyncio.Task, ...] = ()
+        settings = get_settings()
+        recorder = asyncio.create_task(
+            run_recorder(registry, history, settings.kasa_energy_sample_interval)
+        )
+        alerts = asyncio.create_task(
+            run_alert_evaluator(
+                registry,
+                alert_evaluator,
+                alert_center,
+                alert_thresholds,
+                interval=settings.kasa_alert_interval,
+                history=history,
+                webhook_url=settings.kasa_alert_webhook_url,
+            )
+        )
+        tasks: tuple[asyncio.Task, ...] = (recorder, alerts)
     else:
         # Discovery takes many seconds; run it in the background so the API serves
         # immediately (the frontend watches registry.discovering via /api/status).

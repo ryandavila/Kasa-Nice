@@ -7,6 +7,23 @@ A **FastAPI** backend ([`api/`](api/)) talks to your devices via
 [python-kasa](https://github.com/python-kasa/python-kasa) and serves a
 **SvelteKit** single-page frontend ([`web/`](web/)) that streams live state.
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/devices-dark.png">
+    <img src="docs/screenshots/devices-light.png" alt="Kasa-Nice devices tab, showing a lamp, bulb, power strip, and plugs" width="100%">
+  </picture>
+</p>
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/energy-dark.png">
+    <img src="docs/screenshots/energy-light.png" alt="Kasa-Nice energy tab, showing whole-home totals, insights, and per-device usage charts" width="100%">
+  </picture>
+</p>
+
+<sub>Screenshots are generated from seeded in-process fake devices (no real
+hardware) — see <a href="web/e2e/screenshots.spec.ts">web/e2e/screenshots.spec.ts</a>
+and regenerate with <code>just screenshots</code>.</sub>
+
 ## Features
 
 - 🏠 **Local control** — discover and control Kasa devices on your LAN, no cloud

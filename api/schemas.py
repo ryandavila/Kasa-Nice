@@ -281,35 +281,6 @@ def _require(condition: bool, message: str) -> None:  # noqa: FBT001 - tiny guar
         raise ValueError(message)
 
 
-def _validate_rule_shape(
-    *,
-    kind: str,
-    time: str | None,
-    days: list[int],
-    at: str | None,
-    action: str,
-    target: ScheduleTarget | None,
-    scene_id: str | None,
-) -> None:
-    """Cross-field checks shared by the full-rule schemas (create + stored).
-
-    Enforces the per-kind and per-action requirements the flat field set can't
-    express alone: a fixed-time rule needs a ``time``, sun rules and fixed-time
-    rules need at least one weekday, a one-shot needs an ``at``, a scene action
-    needs a ``scene_id``, and every other action needs a ``target``.
-    """
-    if kind == "fixed_time":
-        _require(time is not None, "fixed_time rules require a 'time'")
-    if kind in ("fixed_time", "sunrise", "sunset"):
-        _require(bool(days), "at least one weekday is required")
-    if kind == "once":
-        _require(at is not None, "once rules require an 'at' datetime")
-    if action == "scene":
-        _require(bool(scene_id), "scene actions require a 'scene_id'")
-    else:
-        _require(target is not None, "on/off actions require a 'target'")
-
-
 class ScheduleTarget(BaseModel):
     """What a rule acts on: a single device, or a whole room (group).
 
@@ -330,8 +301,8 @@ class LastFired(BaseModel):
     )
 
 
-class Schedule(BaseModel):
-    """A schedule rule, discriminated by ``kind`` and ``action``.
+class ScheduleCreate(BaseModel):
+    """Fields a client supplies for a rule, discriminated by ``kind``/``action``.
 
     A single flat model rather than a union: the trigger fields (``time`` /
     ``days`` / ``offset_minutes`` / ``at``) and action fields (``target`` /
@@ -341,7 +312,6 @@ class Schedule(BaseModel):
     and lets a newer kind be added without reshaping older rules.
     """
 
-    id: str
     kind: ScheduleKind = "fixed_time"
     enabled: bool = True
     # Local wall-clock time; required (and validated) only for fixed_time rules.
@@ -365,45 +335,6 @@ class Schedule(BaseModel):
     scene_id: str | None = Field(
         default=None, description="Scene to apply for the 'scene' action."
     )
-    # Server-written; null until first fired. Optional so older files load.
-    last_fired: LastFired | None = None
-
-    @field_validator("days")
-    @classmethod
-    def _validate_days(cls, days: list[int]) -> list[int]:
-        return _normalize_days(days)
-
-    @field_validator("at")
-    @classmethod
-    def _validate_at_field(cls, at: str | None) -> str | None:
-        return _validate_at(at)
-
-    @model_validator(mode="after")
-    def _validate_shape(self) -> Schedule:
-        _validate_rule_shape(
-            kind=self.kind,
-            time=self.time,
-            days=self.days,
-            at=self.at,
-            action=self.action,
-            target=self.target,
-            scene_id=self.scene_id,
-        )
-        return self
-
-
-class ScheduleCreate(BaseModel):
-    """Fields a client supplies to create a rule; server assigns id/last_fired."""
-
-    kind: ScheduleKind = "fixed_time"
-    enabled: bool = True
-    time: str | None = Field(default=None, pattern=_HHMM)
-    days: list[int] = Field(default_factory=list)
-    offset_minutes: int = 0
-    at: str | None = None
-    target: ScheduleTarget | None = None
-    action: ScheduleAction
-    scene_id: str | None = None
 
     @field_validator("days")
     @classmethod
@@ -417,16 +348,30 @@ class ScheduleCreate(BaseModel):
 
     @model_validator(mode="after")
     def _validate_shape(self) -> ScheduleCreate:
-        _validate_rule_shape(
-            kind=self.kind,
-            time=self.time,
-            days=self.days,
-            at=self.at,
-            action=self.action,
-            target=self.target,
-            scene_id=self.scene_id,
-        )
+        """Per-kind/per-action requirements the flat field set can't express."""
+        if self.kind == "fixed_time":
+            _require(self.time is not None, "fixed_time rules require a 'time'")
+        if self.kind in ("fixed_time", "sunrise", "sunset"):
+            _require(bool(self.days), "at least one weekday is required")
+        if self.kind == "once":
+            _require(self.at is not None, "once rules require an 'at' datetime")
+        if self.action == "scene":
+            _require(bool(self.scene_id), "scene actions require a 'scene_id'")
+        else:
+            _require(self.target is not None, "on/off actions require a 'target'")
         return self
+
+
+class Schedule(ScheduleCreate):
+    """A stored rule: everything a client may set, plus the server-owned fields.
+
+    Inherits every field and validator from :class:`ScheduleCreate`, so the
+    create and stored shapes can't drift.
+    """
+
+    id: str
+    # Server-written; null until first fired. Optional so older files load.
+    last_fired: LastFired | None = None
 
 
 class ScheduleUpdate(BaseModel):

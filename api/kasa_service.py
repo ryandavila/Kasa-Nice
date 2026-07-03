@@ -21,7 +21,7 @@ from .device_store import DeviceSnapshotStore, HostStore
 from .energy_history import EnergyHistoryStore, history
 from .group_store import GroupStore, groups
 from .logging_config import get_logger
-from .schemas import ChildPlug, Device, Hsv, Usage, UsageStat
+from .schemas import ChildPlug, Device, Hsv, PowerResult, Usage, UsageStat
 
 logger = get_logger(__name__)
 
@@ -101,16 +101,16 @@ def stable_child_id(child: Any) -> str:
 
 
 class EnergySnapshot(NamedTuple):
-    """The three live scalars the background energy recorder persists.
+    """The live scalars the background energy recorder persists.
 
-    Just what ``EnergyHistoryStore.record`` stores (no history tables), so
-    ``read_energy_snapshot`` can skip the per-device stats fetches ``get_usage``
-    needs but the recorder discards every cycle.
+    Just what ``EnergyHistoryStore`` stores (no history tables, no month total —
+    months are recomputed from daily maxima), so ``read_energy_snapshot`` can
+    skip the per-device stats fetches ``get_usage`` needs but the recorder
+    would discard every cycle.
     """
 
     power_w: float | None
     today_kwh: float | None
-    month_kwh: float | None
 
 
 class DeviceRegistry:
@@ -189,6 +189,9 @@ class DeviceRegistry:
         # would serve stale state as reachable forever (no grayed card, no
         # unreachable alert). Any successful read clears the streak.
         self._miss_counts: dict[str, int] = {}
+        # When the last full refresh_all completed, so secondary loops can skip
+        # a refresh the SSE poll just did (see refresh_all_if_stale).
+        self._last_refresh_all: float = float("-inf")
 
     def _hosts(self) -> set[str]:
         """LAN hosts of the currently-cached local devices.
@@ -463,6 +466,19 @@ class DeviceRegistry:
             self._last_cloud_refresh = now
             to_refresh += cloud
         await asyncio.gather(*(self._refresh(d) for d in to_refresh))
+        self._last_refresh_all = time.monotonic()
+        return self.all()
+
+    async def refresh_all_if_stale(self, max_age: float) -> list[KasaDevice]:
+        """``refresh_all()``, unless one already completed within ``max_age`` s.
+
+        The SSE broadcaster refreshes every few seconds while a browser is open;
+        loops with their own cadence (the alert evaluator) call this instead of
+        ``refresh_all`` so they don't duplicate device round-trips that are
+        already fresh.
+        """
+        if time.monotonic() - self._last_refresh_all >= max_age:
+            return await self.refresh_all()
         return self.all()
 
     def all(self) -> list[KasaDevice]:
@@ -681,13 +697,6 @@ class DeviceRegistry:
             raise EnergyUnsupportedError(device_id)
         await self._refresh(device)
 
-        def _safe(name: str) -> float | None:
-            try:
-                value = getattr(energy, name)
-            except Exception:  # noqa: BLE001 - missing reading shouldn't 500
-                return None
-            return float(value) if value is not None else None
-
         daily_raw: dict[int, float] = {}
         monthly_raw: dict[int, float] = {}
         try:
@@ -701,10 +710,10 @@ class DeviceRegistry:
 
         return _build_usage(
             device_id,
-            current_power_w=_safe("current_consumption"),
-            today_kwh=_safe("consumption_today"),
-            month_kwh=_safe("consumption_this_month"),
-            voltage=_safe("voltage"),
+            current_power_w=_safe_energy_value(energy, "current_consumption"),
+            today_kwh=_safe_energy_value(energy, "consumption_today"),
+            month_kwh=_safe_energy_value(energy, "consumption_this_month"),
+            voltage=_safe_energy_value(energy, "voltage"),
             daily_raw=daily_raw,
             monthly_raw=monthly_raw,
             rate=self.energy_rate,
@@ -713,25 +722,23 @@ class DeviceRegistry:
     async def read_energy_snapshot(self, device_id: str) -> EnergySnapshot:
         """Cheap, scalar-only energy read for the background recorder.
 
-        Persists only live power plus today's/this-month's totals, so unlike
-        ``get_usage`` this skips ``get_daily_stats``/``get_monthly_stats`` — the
-        history-table fetches the recorder would discard every cycle. The scalars
-        come from the Energy module's cached ``update()`` data. ``get_usage``
-        stays untouched: it still backs ``/usage``, which needs the tables.
+        Persists only live power plus today's total, so unlike ``get_usage``
+        this skips ``get_daily_stats``/``get_monthly_stats`` — the history-table
+        fetches the recorder would discard every cycle. The scalars come from
+        the Energy module's cached ``update()`` data. ``get_usage`` stays
+        untouched: it still backs ``/usage``, which needs the tables.
         """
         device = self.get(device_id)
 
-        # Cloud strips expose only a rolled-up ``energy_summary()``; there's no
-        # cheaper per-strip scalar read. It already batches into the minimum
-        # round-trips, so routing through it keeps the cloud cost identical to
-        # ``get_usage`` — we just ignore its history maps here.
-        summary = getattr(device, "energy_summary", None)
-        if summary is not None:
-            data = await summary()
+        # Cloud strips expose a scalar-only aggregate (``energy_scalars``) that
+        # skips the per-outlet month-table reads a full summary does — a third
+        # fewer rate-limited cloud RPCs per recorder cycle.
+        scalars = getattr(device, "energy_scalars", None)
+        if scalars is not None:
+            data = await scalars()
             return EnergySnapshot(
                 power_w=data.get("current_power_w"),
                 today_kwh=data.get("today_kwh"),
-                month_kwh=data.get("month_kwh"),
             )
 
         energy = device.modules.get(Module.Energy)
@@ -740,17 +747,9 @@ class DeviceRegistry:
         # A plain refresh populates the cached scalars; no history-table queries.
         await self._refresh(device)
 
-        def _safe(name: str) -> float | None:
-            try:
-                value = getattr(energy, name)
-            except Exception:  # noqa: BLE001 - a missing reading shouldn't stop the cycle
-                return None
-            return float(value) if value is not None else None
-
         return EnergySnapshot(
-            power_w=_safe("current_consumption"),
-            today_kwh=_safe("consumption_today"),
-            month_kwh=_safe("consumption_this_month"),
+            power_w=_safe_energy_value(energy, "current_consumption"),
+            today_kwh=_safe_energy_value(energy, "consumption_today"),
         )
 
     async def set_child_power(
@@ -803,6 +802,50 @@ class DeviceRegistry:
                 await self._refresh(device)
                 return device
         raise DeviceNotFoundError(f"{device_id}/{child_id}")
+
+
+def _safe_energy_value(energy, name: str) -> float | None:
+    """Read one scalar off the Energy module, degrading to None.
+
+    A reading a device doesn't provide (or a module mid-update) must not fail
+    the caller — ``/usage`` shouldn't 500 and a recorder cycle shouldn't stop.
+    """
+    try:
+        value = getattr(energy, name)
+    except Exception:  # noqa: BLE001 - a missing reading is data, not an error
+        return None
+    return float(value) if value is not None else None
+
+
+def partition_results(keys: list[str], results: list) -> tuple[list[str], list[str]]:
+    """Split ``gather(return_exceptions=True)`` output into (succeeded, failed).
+
+    Shared by every fan-out that tolerates per-device failure (room/global
+    power, scene apply) so the partition idiom exists once.
+    """
+    succeeded: list[str] = []
+    failed: list[str] = []
+    for key, result in zip(keys, results, strict=True):
+        (failed if isinstance(result, Exception) else succeeded).append(key)
+    return succeeded, failed
+
+
+async def set_power_many(
+    registry: DeviceRegistry, device_ids: list[str], on: bool
+) -> PowerResult:
+    """Switch many devices concurrently, tolerating per-device failure.
+
+    A device that errors or no longer exists is reported under ``failed``
+    instead of aborting the batch. Service-level so the routes, the scheduler,
+    and room fan-outs share one implementation; callers publish the SSE update
+    afterwards.
+    """
+    results = await asyncio.gather(
+        *(registry.set_power(device_id, on) for device_id in device_ids),
+        return_exceptions=True,
+    )
+    succeeded, failed = partition_results(device_ids, results)
+    return PowerResult(on=on, succeeded=succeeded, failed=failed)
 
 
 def _cost(kwh: float | None, rate: float | None) -> float | None:

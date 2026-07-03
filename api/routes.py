@@ -20,8 +20,10 @@ from .kasa_service import (
     hex_to_hsv,
     registry,
     serialize_device,
+    set_power_many,
     stable_device_id,
 )
+from .logging_config import get_logger
 from .scene_service import SceneNotFoundError, apply_scene
 from .scene_store import scenes
 from .schedule_store import schedules
@@ -61,24 +63,25 @@ from .schemas import (
     WeekComparison,
 )
 
+logger = get_logger(__name__)
+
 router = APIRouter(prefix="/api")
 
 
-async def _set_power_many(device_ids: list[str], on: bool) -> PowerResult:
-    """Switch many devices concurrently, tolerating per-device failure.
+def _validated_rows(rows: list[dict], model: type, noun: str) -> list:
+    """Validate stored rows through ``model``, skipping (and warning on) bad ones.
 
-    A device that errors or no longer exists is reported under ``failed`` instead
-    of aborting the batch. Callers publish the SSE update afterwards.
+    The JSON stores tolerate hand-edited/older files by design, so one invalid
+    row must degrade to a warning — not 500 the whole collection for every
+    client. Writers still validate up front; this is the reader's backstop.
     """
-    results = await asyncio.gather(
-        *(registry.set_power(device_id, on) for device_id in device_ids),
-        return_exceptions=True,
-    )
-    succeeded: list[str] = []
-    failed: list[str] = []
-    for device_id, result in zip(device_ids, results, strict=True):
-        (failed if isinstance(result, Exception) else succeeded).append(device_id)
-    return PowerResult(on=on, succeeded=succeeded, failed=failed)
+    out = []
+    for row in rows:
+        try:
+            out.append(model(**row))
+        except ValidationError as e:
+            logger.warning(f"Skipping invalid stored {noun} {row.get('id')!r}: {e}")
+    return out
 
 
 @router.get("/health")
@@ -300,7 +303,7 @@ async def rename_child(device_id: str, child_id: str, req: RenameRequest) -> Dev
 async def set_all_power(req: PowerRequest) -> PowerResult:
     """Switch every known device at once (primarily 'everything off')."""
     ids = [stable_device_id(d) for d in registry.all()]
-    result = await _set_power_many(ids, req.on)
+    result = await set_power_many(registry, ids, req.on)
     # Push even on partial failure: the devices that did switch changed state.
     await broadcaster.publish_now()
     return result
@@ -489,7 +492,7 @@ async def set_group_power(group_id: str, req: PowerRequest) -> PowerResult:
     group = groups.get_group(group_id)
     if group is None:
         raise HTTPException(status_code=404, detail=f"Unknown group: {group_id}")
-    result = await _set_power_many(group["device_ids"], req.on)
+    result = await set_power_many(registry, group["device_ids"], req.on)
     # Push even on partial failure: the devices that did switch changed state.
     await broadcaster.publish_now()
     return result
@@ -510,9 +513,7 @@ async def set_favorites(req: Favorites) -> Favorites:
 
 @router.get("/schedules", response_model=list[Schedule])
 async def list_schedules() -> list[Schedule]:
-    # Re-validate through the model so a hand-edited/older file can't emit a
-    # malformed rule to the client.
-    return [Schedule(**s) for s in schedules.list_rules()]
+    return _validated_rows(schedules.list_rules(), Schedule, "schedule")
 
 
 def _reject_unfireable_rule(kind: str, at: str | None) -> None:
@@ -635,9 +636,7 @@ def _snapshot_entries(device_ids: list[str]) -> list[dict]:
 
 @router.get("/scenes", response_model=list[Scene])
 async def list_scenes() -> list[Scene]:
-    # Re-validate through the model so a hand-edited/older file can't emit a
-    # malformed scene to the client.
-    return [Scene(**s) for s in scenes.list_scenes()]
+    return _validated_rows(scenes.list_scenes(), Scene, "scene")
 
 
 @router.post("/scenes", response_model=Scene, status_code=201)

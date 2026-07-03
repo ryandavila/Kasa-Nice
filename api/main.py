@@ -15,7 +15,7 @@ from .alerts import (
     run_alert_evaluator,
 )
 from .config import get_settings
-from .energy_history import history, load_sample_interval, run_recorder
+from .energy_history import history, run_recorder
 from .events import broadcaster
 from .events import router as events_router
 from .group_store import groups
@@ -59,9 +59,10 @@ async def lifespan(app: FastAPI):
         # spurious "recovered" storm when the sweep finishes).
         registry.discovering = True
         discovery = asyncio.create_task(registry.run_startup_discovery())
+        settings = get_settings()
         # Sample metered devices and persist readings beyond device memory.
         recorder = asyncio.create_task(
-            run_recorder(registry, history, load_sample_interval())
+            run_recorder(registry, history, settings.kasa_energy_sample_interval)
         )
         # Fire schedule rules on the local clock, so timers work for both local
         # and cloud devices and keep running with no browser open.
@@ -77,7 +78,6 @@ async def lifespan(app: FastAPI):
         )
         # Evaluate the alert detectors (reachability + power thresholds) on their
         # own interval; delivers to the in-app ring buffer and optional webhook.
-        settings = get_settings()
         alerts = asyncio.create_task(
             run_alert_evaluator(
                 registry,
@@ -85,7 +85,7 @@ async def lifespan(app: FastAPI):
                 alert_center,
                 alert_thresholds,
                 interval=settings.kasa_alert_interval,
-                db_path=settings.kasa_energy_history_file,
+                history=history,
                 webhook_url=settings.kasa_alert_webhook_url,
             )
         )

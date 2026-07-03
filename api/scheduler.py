@@ -6,8 +6,8 @@ Modelled on ``run_recorder``: resilient (a bad rule or failed cycle is logged,
 never fatal) and cancellable for clean shutdown.
 
 Firing routes through the same code paths the REST API uses: device rules through
-``registry.set_power``, room rules through ``routes._set_power_many``, then one
-``broadcaster.publish_now()``.
+``registry.set_power``, room rules through ``kasa_service.set_power_many``, then
+one ``broadcaster.publish_now()``.
 
 Tick strategy — a minute *cursor*, not ``sleep(60)``: a fixed sleep drifts off
 the minute boundary, and a slow cycle or suspended process could make a scheduled
@@ -23,8 +23,8 @@ import asyncio
 import datetime
 
 from . import solar
+from .kasa_service import set_power_many
 from .logging_config import get_logger
-from .routes import _set_power_many
 from .scene_service import SceneNotFoundError, apply_scene
 
 logger = get_logger(__name__)
@@ -269,7 +269,7 @@ async def fire_rule(rule: dict, *, registry, groups) -> str:
                 f"Schedule {rule.get('id')} targets unknown room {target_id}"
             )
             return "error: unknown room"
-        result = await _set_power_many(group["device_ids"], on)
+        result = await set_power_many(registry, group["device_ids"], on)
         return _fanout_result(result.succeeded, result.failed)
 
     return f"error: unknown target type {target_type!r}"

@@ -3,15 +3,10 @@ import {
 	createSchedule,
 	updateSchedule,
 	deleteSchedule,
-	ApiError
+	errorMessage as message
 } from '$lib/api/client';
 import type { Schedule, ScheduleCreate, ScheduleUpdate } from '$lib/api/types';
 import { toasts } from './toasts.svelte';
-
-function message(e: unknown): string {
-	if (e instanceof ApiError) return e.message;
-	return e instanceof Error ? e.message : 'Something went wrong';
-}
 
 /**
  * Server-side schedule rules ("at HH:MM on these days, turn X on/off"). The

@@ -12,7 +12,7 @@ import {
 	setAllPower,
 	renameDevice,
 	renameChild,
-	ApiError
+	errorMessage as message
 } from '$lib/api/client';
 import type { Device, DeviceType, PowerResult } from '$lib/api/types';
 import { toasts } from './toasts.svelte';
@@ -21,11 +21,6 @@ import { toasts } from './toasts.svelte';
 export const TYPE_ORDER: DeviceType[] = ['Bulb', 'LightStrip', 'Dimmer', 'Strip', 'Plug'];
 
 type Status = 'idle' | 'loading' | 'ready' | 'error';
-
-function message(e: unknown): string {
-	if (e instanceof ApiError) return e.message;
-	return e instanceof Error ? e.message : 'Something went wrong';
-}
 
 class DeviceStore {
 	devices = $state<Device[]>([]);

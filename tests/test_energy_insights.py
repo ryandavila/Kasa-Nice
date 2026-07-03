@@ -67,9 +67,9 @@ def test_insights_empty_db_is_zeros_and_nulls(store, group_store, monkeypatch):
 def test_insights_projection_and_costs_with_rate(store, group_store, monkeypatch):
     today = datetime.date.today()
     first = today.replace(day=1)
-    store.record("10.0.0.4", 5.0, 0.5, 2.0, ts=_local_noon(first))
+    store.record("10.0.0.4", 5.0, 0.5, ts=_local_noon(first))
     if first != today:
-        store.record("10.0.0.4", 5.0, 0.3, 2.0, ts=_local_noon(today))
+        store.record("10.0.0.4", 5.0, 0.3, ts=_local_noon(today))
     mtd = 0.5 + (0.3 if first != today else 0.0)
     days_in_month = calendar.monthrange(today.year, today.month)[1]
     expected_proj = round(mtd / today.day * days_in_month, 3)
@@ -87,8 +87,8 @@ def test_insights_projection_and_costs_with_rate(store, group_store, monkeypatch
 
 def test_insights_rooms_rollup_with_unassigned_bucket(store, group_store, monkeypatch):
     today = datetime.date.today()
-    store.record("dev-a", 5.0, 0.4, 1.0, ts=_local_noon(today))
-    store.record("dev-b", 5.0, 0.6, 1.0, ts=_local_noon(today))
+    store.record("dev-a", 5.0, 0.4, ts=_local_noon(today))
+    store.record("dev-b", 5.0, 0.6, ts=_local_noon(today))
     gid = group_store.create_group("Kitchen")["id"]
     group_store.update_group(gid, device_ids=["dev-a"])
 
@@ -106,7 +106,7 @@ def test_insights_rooms_rollup_with_unassigned_bucket(store, group_store, monkey
 
 def test_insights_room_costs_null_without_rate(store, group_store, monkeypatch):
     today = datetime.date.today()
-    store.record("dev-a", 5.0, 0.4, 1.0, ts=_local_noon(today))
+    store.record("dev-a", 5.0, 0.4, ts=_local_noon(today))
     gid = group_store.create_group("Den")["id"]
     group_store.update_group(gid, device_ids=["dev-a"])
     body = (
@@ -123,8 +123,8 @@ def test_insights_week_over_week(store, group_store, monkeypatch):
     today = datetime.date.today()
     this_monday = today - datetime.timedelta(days=today.weekday())
     prev_week_day = this_monday - datetime.timedelta(days=3)  # in the previous week
-    store.record("dev-a", 5.0, 0.5, 1.0, ts=_local_noon(this_monday))
-    store.record("dev-a", 5.0, 0.9, 1.0, ts=_local_noon(prev_week_day))
+    store.record("dev-a", 5.0, 0.5, ts=_local_noon(this_monday))
+    store.record("dev-a", 5.0, 0.9, ts=_local_noon(prev_week_day))
     body = (
         _client(DeviceRegistry(), store, group_store, monkeypatch)
         .get("/api/energy/insights")
@@ -137,7 +137,7 @@ def test_insights_week_over_week(store, group_store, monkeypatch):
 def test_insights_flags_idle_hog_with_live_alias(store, group_store, monkeypatch):
     day = datetime.date.today() - datetime.timedelta(days=1)
     for hour, watts in ((2, 4.0), (3, 6.0), (4, 8.0)):  # median 6 > 2W threshold
-        store.record("10.0.0.4", watts, None, None, ts=_local_hour(day, hour))
+        store.record("10.0.0.4", watts, None, ts=_local_hour(day, hour))
     reg = DeviceRegistry()
     reg._devices = {"10.0.0.4": FakeDevice("10.0.0.4", alias="Fridge", has_energy=True)}
 
@@ -158,7 +158,7 @@ def test_insights_idle_falls_back_to_id_and_flags_low_draw(
     day = datetime.date.today() - datetime.timedelta(days=1)
     # A device gone from the registry: labelled by its id. 0.5W is below the
     # threshold, so it's listed but not flagged.
-    store.record("ghost", 0.5, None, None, ts=_local_hour(day, 3))
+    store.record("ghost", 0.5, None, ts=_local_hour(day, 3))
     body = (
         _client(DeviceRegistry(), store, group_store, monkeypatch)
         .get("/api/energy/insights")

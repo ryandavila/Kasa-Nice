@@ -1,12 +1,12 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { getConfig } from '$lib/api/client';
 	import type {
 		ScheduleAction,
 		ScheduleCreate,
 		ScheduleKind,
 		ScheduleUpdate
 	} from '$lib/api/types';
+	import { configStore } from '$lib/stores/config.svelte';
 	import { deviceStore } from '$lib/stores/devices.svelte';
 	import { groupStore } from '$lib/stores/groups.svelte';
 	import { scheduleStore } from '$lib/stores/schedules.svelte';
@@ -27,7 +27,7 @@
 
 	// Whether the server has a location set; sunrise/sunset rules can't fire (and
 	// the API rejects creating them) without one, so the composer warns and blocks.
-	let locationConfigured = $state(true);
+	const locationConfigured = $derived(configStore.locationConfigured);
 
 	onMount(() => {
 		scheduleStore.load();
@@ -37,9 +37,7 @@
 		if (!deviceStore.devices.length) deviceStore.load();
 		if (!groupStore.loaded) groupStore.load();
 		if (!sceneStore.loaded) sceneStore.load();
-		getConfig()
-			.then((cfg) => (locationConfigured = cfg.location_configured))
-			.catch(() => {}); // best-effort; assume configured so we don't over-warn
+		configStore.load();
 	});
 
 	// The rule being edited (its id), 'new' while composing, or null when closed.

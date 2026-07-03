@@ -146,70 +146,64 @@ class Settings(BaseSettings):
     # raw string; an *unset* var uses the field default without hitting these, so
     # only a set-but-bad value warns.
 
+    @staticmethod
+    def _lenient_number(
+        value: object, name: str, default: float | None, minimum: float | None = None
+    ) -> float | None:
+        """Shared warn-and-default parsing for the numeric knobs.
+
+        None/blank means the var is simply unset (default, silently); a
+        non-numeric value warns and uses the default; ``minimum`` floors the
+        result (so a misconfigured tiny interval can't busy-loop a worker).
+        """
+        if value is None:
+            return default
+        text = str(value).strip()
+        if not text:
+            return default
+        try:
+            parsed = float(text)
+        except ValueError:
+            logger.warning(f"Ignoring invalid {name}={value!r}; expected a number")
+            return default
+        if minimum is not None:
+            parsed = max(minimum, parsed)
+        return parsed
+
     @field_validator("kasa_energy_rate", mode="before")
     @classmethod
     def _parse_energy_rate(cls, value: object) -> float | None:
-        if value is None:
-            return None
-        text = str(value).strip()
-        if not text:
-            return None
-        try:
-            return float(text)
-        except ValueError:
-            logger.warning(
-                f"Ignoring invalid KASA_ENERGY_RATE={value!r}; expected a number"
-            )
-            return None
+        return cls._lenient_number(value, "KASA_ENERGY_RATE", None)
 
     @field_validator("kasa_cloud_poll_interval", mode="before")
     @classmethod
     def _parse_cloud_poll_interval(cls, value: object) -> float:
-        if value is None:
-            return _DEFAULT_CLOUD_POLL_INTERVAL
-        text = str(value).strip()
-        if not text:
-            return _DEFAULT_CLOUD_POLL_INTERVAL
-        try:
-            return max(0.0, float(text))
-        except ValueError:
-            logger.warning(
-                f"Ignoring invalid KASA_CLOUD_POLL_INTERVAL={value!r}; using 30s"
-            )
-            return _DEFAULT_CLOUD_POLL_INTERVAL
+        return cls._lenient_number(
+            value,
+            "KASA_CLOUD_POLL_INTERVAL",
+            _DEFAULT_CLOUD_POLL_INTERVAL,
+            minimum=0.0,
+        )
 
     @field_validator("kasa_energy_sample_interval", mode="before")
     @classmethod
     def _parse_sample_interval(cls, value: object) -> float:
-        # Floored at 10s so a misconfigured tiny value can't busy-loop.
-        if value is None:
-            return _DEFAULT_ENERGY_SAMPLE_INTERVAL
-        text = str(value).strip()
-        if not text:
-            return _DEFAULT_ENERGY_SAMPLE_INTERVAL
-        try:
-            return max(_MIN_ENERGY_SAMPLE_INTERVAL, float(text))
-        except ValueError:
-            logger.warning(
-                f"Ignoring invalid KASA_ENERGY_SAMPLE_INTERVAL={value!r}; using 300s"
-            )
-            return _DEFAULT_ENERGY_SAMPLE_INTERVAL
+        return cls._lenient_number(
+            value,
+            "KASA_ENERGY_SAMPLE_INTERVAL",
+            _DEFAULT_ENERGY_SAMPLE_INTERVAL,
+            minimum=_MIN_ENERGY_SAMPLE_INTERVAL,
+        )
 
     @field_validator("kasa_alert_interval", mode="before")
     @classmethod
     def _parse_alert_interval(cls, value: object) -> float:
-        # Floored at 10s so a misconfigured tiny value can't busy-loop the
-        # evaluator (mirrors the energy-sample-interval knob).
-        if value is None:
-            return _DEFAULT_ALERT_INTERVAL
-        text = str(value).strip()
-        if not text:
-            return _DEFAULT_ALERT_INTERVAL
-        try:
-            return max(_MIN_ALERT_INTERVAL, float(text))
-        except ValueError:
-            logger.warning(f"Ignoring invalid KASA_ALERT_INTERVAL={value!r}; using 60s")
-            return _DEFAULT_ALERT_INTERVAL
+        return cls._lenient_number(
+            value,
+            "KASA_ALERT_INTERVAL",
+            _DEFAULT_ALERT_INTERVAL,
+            minimum=_MIN_ALERT_INTERVAL,
+        )
 
     @field_validator("kasa_latitude", mode="before")
     @classmethod
@@ -248,16 +242,7 @@ class Settings(BaseSettings):
     def _parse_port(cls, value: object) -> int:
         # Warn and fall back to 8080 rather than raising, so garbage can't crash
         # startup (matches the other numeric knobs).
-        if value is None:
-            return _DEFAULT_PORT
-        text = str(value).strip()
-        if not text:
-            return _DEFAULT_PORT
-        try:
-            return int(text)
-        except ValueError:
-            logger.warning(f"Ignoring invalid KASA_PORT={value!r}; using 8080")
-            return _DEFAULT_PORT
+        return int(cls._lenient_number(value, "KASA_PORT", float(_DEFAULT_PORT)))
 
     @field_validator("kasa_cloud_fallback", "kasa_fake_devices", mode="before")
     @classmethod

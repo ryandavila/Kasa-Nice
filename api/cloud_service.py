@@ -301,18 +301,36 @@ class CloudDevice:
                 and now - self._energy_summary_at < _ENERGY_SUMMARY_TTL
             ):
                 return self._energy_summary_cache
-            data = await self._fetch_energy_summary()
+            data = await self._fetch_emeter(include_months=True)
             self._energy_summary_cache = data
             self._energy_summary_at = time.monotonic()
             return data
 
-    async def _fetch_energy_summary(self) -> dict[str, Any]:
-        """The uncached read behind ``energy_summary``.
+    async def energy_scalars(self) -> dict[str, Any]:
+        """Realtime power plus today's kWh only — the recorder's cheap read.
+
+        The recorder persists nothing derived from the month table, so this
+        skips each outlet's ``get_monthstat`` (a whole-year read), cutting the
+        cloud burst by a third versus the full summary. A fresh summary cache is
+        reused rather than re-fetching.
+        """
+        async with self._energy_summary_lock:
+            if (
+                self._energy_summary_cache is not None
+                and time.monotonic() - self._energy_summary_at < _ENERGY_SUMMARY_TTL
+            ):
+                return self._energy_summary_cache
+        return await self._fetch_emeter(include_months=False)
+
+    async def _fetch_emeter(self, *, include_months: bool) -> dict[str, Any]:
+        """The uncached per-outlet emeter read behind the two aggregates.
 
         Metering is per-outlet (a parent read returns only slot 0), so read
-        realtime power, this month's days, and this year's months per outlet
-        concurrently and sum them. Returns the kwargs the registry's ``Usage``
-        builder expects. On-demand only, so it never runs on the state poll.
+        realtime power, this month's days, and (for the full summary) this
+        year's months per outlet concurrently and sum them. Returns the kwargs
+        the registry's ``Usage`` builder expects; without months, ``month_kwh``
+        and ``monthly_raw`` stay None/empty. On-demand only, so it never runs on
+        the state poll.
         """
         # The device buckets history by its OWN clock, which can drift, so derive
         # "today"/"this month" from the device — else today_kwh/month_kwh query an
@@ -353,12 +371,14 @@ class CloudDevice:
             now = datetime.now()
             year, month, today = now.year, now.month, now.day
 
-        async def per_child(cid: str) -> tuple[dict, dict, dict]:
-            return await asyncio.gather(
+        async def per_child(cid: str) -> tuple[dict, ...]:
+            calls = [
                 self._emeter(cid, "get_realtime", {}),
                 self._emeter(cid, "get_daystat", {"year": year, "month": month}),
-                self._emeter(cid, "get_monthstat", {"year": year}),
-            )
+            ]
+            if include_months:
+                calls.append(self._emeter(cid, "get_monthstat", {"year": year}))
+            return await asyncio.gather(*calls)
 
         results = await asyncio.gather(
             *(per_child(c.child_id) for c in self.children),
@@ -373,13 +393,13 @@ class CloudDevice:
             if isinstance(result, BaseException):
                 logger.error(f"Cloud emeter read failed for {self.host}: {result}")
                 continue
-            realtime, daystat, monthstat = result
+            realtime, daystat, *monthstat = result
             total_power_mw += realtime.get("power_mw") or 0
             if voltage_mv := realtime.get("voltage_mv"):
                 voltages.append(voltage_mv / 1000)
             for entry in daystat.get("day_list", []):
                 daily[entry["day"]] = daily.get(entry["day"], 0.0) + _entry_kwh(entry)
-            for entry in monthstat.get("month_list", []):
+            for entry in monthstat[0].get("month_list", []) if monthstat else []:
                 key = entry["month"]
                 monthly[key] = monthly.get(key, 0.0) + _entry_kwh(entry)
 
@@ -387,7 +407,7 @@ class CloudDevice:
             "current_power_w": total_power_mw / 1000,
             "voltage": sum(voltages) / len(voltages) if voltages else None,
             "today_kwh": daily.get(today),
-            "month_kwh": monthly.get(month),
+            "month_kwh": monthly.get(month) if include_months else None,
             "daily_raw": daily,
             "monthly_raw": monthly,
         }

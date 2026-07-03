@@ -37,6 +37,16 @@ export class ApiError extends Error {
 	}
 }
 
+/**
+ * Human-readable message for any thrown value. ApiError carries the server's
+ * detail string; anything else falls back generically. Shared by every store's
+ * toast handling so the wording can't drift per feature.
+ */
+export function errorMessage(e: unknown, fallback = 'Something went wrong'): string {
+	if (e instanceof ApiError) return e.message;
+	return e instanceof Error ? e.message : fallback;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
 	const res = await fetch(`${BASE}${path}`, {
 		headers: { 'Content-Type': 'application/json' },

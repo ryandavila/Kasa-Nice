@@ -5,15 +5,15 @@ code — the Schedules feature drives scenes through :func:`apply_scene` directl
 never over HTTP. The route is a thin wrapper that translates the not-found case
 into a 404.
 
-Mirrors ``routes._set_power_many``: fan out per device with
-``asyncio.gather(return_exceptions=True)`` so one unreachable device doesn't
-abort the rest, report per-device success/failure, then nudge the SSE stream.
+Same fan-out contract as ``kasa_service.set_power_many``: gather with
+``return_exceptions=True`` so one unreachable device doesn't abort the rest,
+partition per-device success/failure, then nudge the SSE stream.
 """
 
 import asyncio
 
 from .events import broadcaster
-from .kasa_service import registry
+from .kasa_service import partition_results, registry
 from .scene_store import scenes
 from .schemas import SceneApplyResult
 
@@ -62,12 +62,9 @@ async def apply_scene(scene_id: str) -> SceneApplyResult:
         *(_apply_entry(entry) for entry in entries),
         return_exceptions=True,
     )
-    succeeded: list[str] = []
-    failed: list[str] = []
-    for entry, result in zip(entries, results, strict=True):
-        (failed if isinstance(result, Exception) else succeeded).append(
-            entry["device_id"]
-        )
+    succeeded, failed = partition_results(
+        [entry["device_id"] for entry in entries], results
+    )
     # Push the aggregate change even on partial failure: devices did move.
     await broadcaster.publish_now()
     return SceneApplyResult(succeeded=succeeded, failed=failed)

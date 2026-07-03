@@ -12,6 +12,8 @@ vi.mock('$lib/api/client', () => {
 	}
 	return {
 		ApiError,
+		errorMessage: (e: unknown, fallback = 'Something went wrong') =>
+			e instanceof Error ? e.message : fallback,
 		listScenes: vi.fn(),
 		createScene: vi.fn(),
 		updateScene: vi.fn(),

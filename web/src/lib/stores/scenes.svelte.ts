@@ -4,15 +4,10 @@ import {
 	updateScene,
 	deleteScene,
 	applyScene,
-	ApiError
+	errorMessage as message
 } from '$lib/api/client';
 import type { Scene } from '$lib/api/types';
 import { toasts } from './toasts.svelte';
-
-function message(e: unknown): string {
-	if (e instanceof ApiError) return e.message;
-	return e instanceof Error ? e.message : 'Something went wrong';
-}
 
 /**
  * Named scenes — a saved per-device state applied as one action. The backend

@@ -1,6 +1,8 @@
 import asyncio
 import contextlib
 import sqlite3
+import time
+from pathlib import Path
 
 import pytest
 from conftest import FakeDevice
@@ -16,9 +18,9 @@ from api.alerts import (
     DeviceReading,
     collect_readings,
     deliver_webhook,
-    latest_power_readings,
     run_alert_evaluator,
 )
+from api.energy_history import EnergyHistoryStore
 from api.kasa_service import DeviceRegistry
 
 
@@ -122,7 +124,7 @@ def test_threshold_store_missing_file_is_empty(tmp_path):
     assert AlertThresholdStore(tmp_path / "nope.json").get_all() == {}
 
 
-# ── latest_power_readings (own SQL over the samples DB) ────────────────────────
+# ── Latest-power lookup (EnergyHistoryStore glue) ──────────────────────────────
 
 
 def _seed_samples(path, rows):
@@ -138,7 +140,11 @@ def _seed_samples(path, rows):
     conn.close()
 
 
-def test_latest_power_readings_returns_most_recent_per_device(tmp_path):
+def _staleness() -> float:
+    return alerts._POWER_STALENESS_SECONDS
+
+
+def test_latest_power_returns_most_recent_per_device(tmp_path):
     db = tmp_path / "energy.db"
     now = 1_000_000
     _seed_samples(
@@ -149,10 +155,14 @@ def test_latest_power_readings_returns_most_recent_per_device(tmp_path):
             ("d2", now - 5, 40.0),
         ],
     )
-    assert latest_power_readings(db, now=now) == {"d1": 25.0, "d2": 40.0}
+    store = EnergyHistoryStore(db)
+    assert store.latest_power_by_device(_staleness(), now=now) == {
+        "d1": 25.0,
+        "d2": 40.0,
+    }
 
 
-def test_latest_power_readings_ignores_stale_and_null(tmp_path):
+def test_latest_power_ignores_stale_and_null(tmp_path):
     db = tmp_path / "energy.db"
     now = 1_000_000
     _seed_samples(
@@ -163,11 +173,13 @@ def test_latest_power_readings_ignores_stale_and_null(tmp_path):
             ("d1", now - 20, 7.0),  # newest non-null wins
         ],
     )
-    assert latest_power_readings(db, now=now) == {"d1": 7.0}
+    store = EnergyHistoryStore(db)
+    assert store.latest_power_by_device(_staleness(), now=now) == {"d1": 7.0}
 
 
-def test_latest_power_readings_missing_db_is_empty(tmp_path):
-    assert latest_power_readings(tmp_path / "absent.db") == {}
+def test_latest_power_missing_db_is_empty(tmp_path):
+    store = EnergyHistoryStore(tmp_path / "absent.db")
+    assert store.latest_power_by_device(_staleness()) == {}
 
 
 # ── collect_readings (registry + DB glue) ─────────────────────────────────────
@@ -176,15 +188,13 @@ def test_latest_power_readings_missing_db_is_empty(tmp_path):
 def test_collect_readings_marks_reachable_and_attaches_power(tmp_path):
     db = tmp_path / "energy.db"
     # Seed at "now" so the sample is inside the staleness window without patching.
-    import time as _time
-
-    _seed_samples(db, [("10.0.0.4", int(_time.time()), 12.5)])
+    _seed_samples(db, [("10.0.0.4", int(time.time()), 12.5)])
     reg = DeviceRegistry()
     reg._devices = {
         "10.0.0.1": FakeDevice("10.0.0.1", alias="Plug"),
         "10.0.0.4": FakeDevice("10.0.0.4", alias="Meter", has_energy=True),
     }
-    readings = collect_readings(reg, db)
+    readings = collect_readings(reg, EnergyHistoryStore(db))
 
     by_id = {r.device_id: r for r in readings}
     assert by_id["10.0.0.1"].reachable is True
@@ -283,8 +293,8 @@ def test_run_loop_emits_and_dispatches_then_cancels(tmp_path, monkeypatch):
     thresholds.set_all({"10.0.0.4": 5.0})
 
     db = tmp_path / "energy.db"
-    _seed_samples(db, [("10.0.0.4", 10**9, 12.5)])
-    monkeypatch.setattr(alerts.time, "time", lambda: 10**9)
+    # Seed at "now" so the sample is inside the staleness window without patching.
+    _seed_samples(db, [("10.0.0.4", int(time.time()), 12.5)])
 
     reg = DeviceRegistry()
     reg._devices = {"10.0.0.4": FakeDevice("10.0.0.4", alias="Meter", has_energy=True)}
@@ -303,7 +313,7 @@ def test_run_loop_emits_and_dispatches_then_cancels(tmp_path, monkeypatch):
                 center,
                 thresholds,
                 interval=0.01,
-                db_path=db,
+                history=EnergyHistoryStore(db),
                 webhook_url="https://hook",
                 deliver=fake_deliver,
             )
@@ -334,8 +344,8 @@ def test_run_loop_holds_off_while_discovering(tmp_path, monkeypatch):
     thresholds.set_all({"10.0.0.4": 5.0})
 
     db = tmp_path / "energy.db"
-    _seed_samples(db, [("10.0.0.4", 10**9, 12.5)])
-    monkeypatch.setattr(alerts.time, "time", lambda: 10**9)
+    # Seed at "now" so the sample is inside the staleness window without patching.
+    _seed_samples(db, [("10.0.0.4", int(time.time()), 12.5)])
 
     reg = DeviceRegistry()
     reg._devices = {"10.0.0.4": FakeDevice("10.0.0.4", alias="Meter", has_energy=True)}
@@ -344,7 +354,12 @@ def test_run_loop_holds_off_while_discovering(tmp_path, monkeypatch):
     async def drive():
         task = asyncio.create_task(
             run_alert_evaluator(
-                reg, evaluator, center, thresholds, interval=0.005, db_path=db
+                reg,
+                evaluator,
+                center,
+                thresholds,
+                interval=0.005,
+                history=EnergyHistoryStore(db),
             )
         )
         await asyncio.sleep(0.05)
@@ -375,7 +390,7 @@ def test_run_loop_survives_a_failing_cycle():
                 center,
                 AlertThresholdStore("/nonexistent/alerts.json"),
                 interval=0.005,
-                db_path="/nonexistent/energy.db",
+                history=EnergyHistoryStore(Path("/nonexistent/energy.db")),
             )
         )
         await asyncio.sleep(0.05)

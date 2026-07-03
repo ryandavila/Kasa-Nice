@@ -15,7 +15,7 @@ import sqlite3
 import time
 from pathlib import Path
 
-from .config import Settings, get_settings
+from .config import get_settings
 from .logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -51,25 +51,67 @@ class EnergyHistoryStore:
         conn.commit()
         return conn
 
+    # NOTE: the table's ``month_kwh`` column is legacy — every month aggregate is
+    # recomputed from daily maxima of ``today_kwh`` (see ``month_kwh_by_device``),
+    # so nothing writes or reads it anymore. It stays in the DDL only so existing
+    # DBs and downgrades keep working.
+
     def record(
         self,
         device_id: str,
         power_w: float | None,
         today_kwh: float | None,
-        month_kwh: float | None,
         ts: int | None = None,
     ) -> None:
         """Append one reading. Best-effort: an IO error is logged, not raised."""
         ts = int(time.time()) if ts is None else ts
+        self.record_many([(device_id, ts, power_w, today_kwh)])
+
+    def record_many(
+        self, rows: list[tuple[str, int, float | None, float | None]]
+    ) -> None:
+        """Append a batch of ``(device_id, ts, power_w, today_kwh)`` readings.
+
+        One connection and one transaction for the whole batch, so a recorder
+        cycle costs one commit instead of one per device. Best-effort like
+        :meth:`record`.
+        """
+        if not rows:
+            return
         try:
             with self._connect() as conn:
-                conn.execute(
-                    "INSERT INTO samples (device_id, ts, power_w, today_kwh, "
-                    "month_kwh) VALUES (?, ?, ?, ?, ?)",
-                    (device_id, ts, power_w, today_kwh, month_kwh),
+                conn.executemany(
+                    "INSERT INTO samples (device_id, ts, power_w, today_kwh) "
+                    "VALUES (?, ?, ?, ?)",
+                    rows,
                 )
         except sqlite3.Error as e:
-            logger.warning(f"Could not record energy sample for {device_id}: {e}")
+            logger.warning(f"Could not record energy samples: {e}")
+
+    def latest_power_by_device(
+        self, max_age_seconds: float, *, now: int | None = None
+    ) -> dict[str, float]:
+        """Latest non-null power (watts) per device, ignoring rows older than
+        ``max_age_seconds``.
+
+        Single pass: SQLite's bare-column-with-MAX semantics select ``power_w``
+        from each device's max-``ts`` row. Serves the alert evaluator; degrades
+        to an empty map like the other queries, so a missing DB/table can't
+        break alerting.
+        """
+        now = int(time.time()) if now is None else now
+        cutoff = now - int(max_age_seconds)
+        try:
+            with self._connect() as conn:
+                rows = conn.execute(
+                    "SELECT device_id, power_w, MAX(ts) FROM samples "
+                    "WHERE ts >= ? AND power_w IS NOT NULL GROUP BY device_id",
+                    (cutoff,),
+                ).fetchall()
+        except sqlite3.Error as e:
+            logger.debug(f"Could not read latest power by device: {e}")
+            return {}
+        return {str(device_id): float(power) for device_id, power, _ in rows}
 
     def recent_samples(
         self, device_id: str, since_ts: int
@@ -253,47 +295,43 @@ async def run_recorder(registry, store: EnergyHistoryStore, interval: float) -> 
 
     Background task launched at startup. Resilient: a per-device read failure is
     skipped, the cycle is wrapped so a bug can't kill the loop, and cancellation
-    propagates for clean shutdown.
+    propagates for clean shutdown. Devices are sampled concurrently (one slow
+    cloud strip mustn't stall — and time-skew — everyone else's sample), the
+    cycle's rows are written in one batch off the event loop, and pruning runs
+    at most daily rather than every cycle.
     """
     from .kasa_service import EnergyUnsupportedError, stable_device_id
 
+    async def sample(device_id: str) -> tuple | None:
+        try:
+            # Snapshot, not get_usage: stores only the live scalars, so it
+            # skips the daily/monthly stats-table fetches get_usage does.
+            snapshot = await registry.read_energy_snapshot(device_id)
+        except EnergyUnsupportedError:
+            return None  # no energy meter; nothing to record
+        except Exception as e:  # noqa: BLE001 - one bad device shouldn't stop the cycle
+            logger.debug(f"Energy sample for {device_id} failed: {e}")
+            return None
+        return (device_id, int(time.time()), snapshot.power_w, snapshot.today_kwh)
+
+    last_prune = float("-inf")
     while True:
         try:
-            for device in registry.all():
-                # Key by stable id (not LAN IP) so history survives a DHCP change
-                # and lines up with the ids the API serves.
-                device_id = stable_device_id(device)
-                try:
-                    # Snapshot, not get_usage: stores only three scalars, so it
-                    # skips the daily/monthly stats-table fetches get_usage does.
-                    snapshot = await registry.read_energy_snapshot(device_id)
-                except EnergyUnsupportedError:
-                    continue  # no energy meter; nothing to record
-                except Exception as e:  # noqa: BLE001 - one bad device shouldn't stop the cycle
-                    logger.debug(f"Energy sample for {device_id} failed: {e}")
-                    continue
-                store.record(
-                    device_id,
-                    snapshot.power_w,
-                    snapshot.today_kwh,
-                    snapshot.month_kwh,
-                )
-            store.prune(int(time.time()) - _RETENTION_SECONDS)
+            # Key by stable id (not LAN IP) so history survives a DHCP change
+            # and lines up with the ids the API serves.
+            ids = [stable_device_id(d) for d in registry.all()]
+            results = await asyncio.gather(*(sample(device_id) for device_id in ids))
+            rows = [row for row in results if row is not None]
+            await asyncio.to_thread(store.record_many, rows)
+            now = time.time()
+            if now - last_prune >= 86400:
+                last_prune = now
+                await asyncio.to_thread(store.prune, int(now) - _RETENTION_SECONDS)
         except asyncio.CancelledError:
             raise
         except Exception as e:  # noqa: BLE001 - the recorder must never crash startup
             logger.error(f"Energy recorder cycle failed: {e}")
         await asyncio.sleep(interval)
-
-
-def load_sample_interval(settings: Settings | None = None) -> float:
-    """Seconds between recorder cycles (``KASA_ENERGY_SAMPLE_INTERVAL``).
-
-    Parsing/clamping (default 300s, floored at 10s, warn-on-invalid) lives in
-    ``api.config``; ``settings`` defaults to the shared instance.
-    """
-    settings = settings or get_settings()
-    return settings.kasa_energy_sample_interval
 
 
 # Module-level singleton. DB at KASA_ENERGY_HISTORY_FILE (default

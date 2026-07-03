@@ -1,8 +1,10 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import type { EnergyHistory, EnergySummary, Usage, UsageStat } from '$lib/api/types';
-	import { getUsage, getHistory, getConfig, getEnergySummary, ApiError } from '$lib/api/client';
+	import { getUsage, getHistory, getEnergySummary, errorMessage } from '$lib/api/client';
 	import { deviceStore } from '$lib/stores/devices.svelte';
+	import { configStore } from '$lib/stores/config.svelte';
+	import { fmt, fmtMoney } from '$lib/format';
 	import Icon from './Icon.svelte';
 	import EnergyChart from './EnergyChart.svelte';
 	import EnergyInsights from './EnergyInsights.svelte';
@@ -28,8 +30,8 @@
 
 	// Global flat $/kWh rate used to show money cost alongside kWh. The cost is a
 	// flat-rate approximation (no tiered/time-of-use billing) computed server-side.
-	let energyRate = $state<number | null>(null);
-	let currency = $state('$');
+	const energyRate = $derived(configStore.energyRate);
+	const currency = $derived(configStore.currency);
 
 	async function loadOne(id: string) {
 		loading[id] = true;
@@ -37,7 +39,7 @@
 		try {
 			usage[id] = await getUsage(id);
 		} catch (e) {
-			errors[id] = e instanceof ApiError ? e.message : 'Failed to read energy data';
+			errors[id] = errorMessage(e, 'Failed to read energy data');
 		} finally {
 			loading[id] = false;
 		}
@@ -65,23 +67,8 @@
 
 	onMount(() => {
 		loadAll();
-		getConfig()
-			.then((cfg) => {
-				energyRate = cfg.energy_rate;
-				currency = cfg.energy_currency || '$';
-			})
-			.catch(() => {
-				// config is best-effort; cost display just stays hidden
-			});
+		configStore.load(); // cost display stays hidden until the rate is known
 	});
-
-	function fmt(v: number | null, digits = 2): string {
-		return v == null ? '—' : v.toFixed(digits);
-	}
-
-	function fmtMoney(v: number | null): string {
-		return v == null ? '—' : currency + v.toFixed(2);
-	}
 </script>
 
 {#if !meters.length}
@@ -129,7 +116,7 @@
 							</dd>
 							{#if energyRate != null && s.cost != null}
 								<dd class="mt-1 font-display text-base font-semibold text-accent-ink">
-									≈{fmtMoney(s.cost)}
+									≈{fmtMoney(s.cost, currency)}
 								</dd>
 							{/if}
 						</div>
@@ -179,7 +166,7 @@
 								</dd>
 								{#if energyRate != null && s.cost != null}
 									<dd class="mt-1 font-display text-base font-semibold text-accent-ink">
-										≈{fmtMoney(s.cost)}
+										≈{fmtMoney(s.cost, currency)}
 									</dd>
 								{/if}
 							</div>

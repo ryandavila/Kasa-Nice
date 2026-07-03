@@ -1,13 +1,13 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import type { AlertType } from '$lib/api/types';
+	import { dismissable } from '$lib/actions/dismissable';
 	import { alertStore } from '$lib/stores/alerts.svelte';
 	import { deviceStore } from '$lib/stores/devices.svelte';
 
 	// Local dropdown state. The bell lives in the header; the panel is anchored to
-	// it and closes on an outside click or Escape (see the svelte:window handlers).
+	// it and closes on an outside click or Escape (the dismissable action).
 	let open = $state(false);
-	let container = $state<HTMLDivElement | null>(null);
 
 	// Only metered, reachable devices can have a wattage threshold; an unreachable
 	// or unmetered device has no live draw to compare against.
@@ -17,14 +17,6 @@
 		open = !open;
 		// Opening the panel is the "seen" signal, so the badge clears on view.
 		if (open) alertStore.markSeen();
-	}
-
-	function onWindowClick(e: MouseEvent) {
-		if (open && container && !container.contains(e.target as Node)) open = false;
-	}
-
-	function onWindowKey(e: KeyboardEvent) {
-		if (e.key === 'Escape') open = false;
 	}
 
 	// Per-type presentation: a dot color and short label. Kept here (not in the
@@ -57,9 +49,7 @@
 	});
 </script>
 
-<svelte:window onclick={onWindowClick} onkeydown={onWindowKey} />
-
-<div class="relative" bind:this={container}>
+<div class="relative" use:dismissable={() => (open = false)}>
 	<button
 		type="button"
 		onclick={toggle}

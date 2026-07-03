@@ -5,15 +5,10 @@ import {
 	deleteGroup,
 	getFavorites,
 	setFavorites,
-	ApiError
+	errorMessage as message
 } from '$lib/api/client';
 import type { Group } from '$lib/api/types';
 import { toasts } from './toasts.svelte';
-
-function message(e: unknown): string {
-	if (e instanceof ApiError) return e.message;
-	return e instanceof Error ? e.message : 'Something went wrong';
-}
 
 /**
  * Rooms (groups) and favorites — a purely organizational layer over the flat

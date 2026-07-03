@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { ChildPlug, Device } from '$lib/api/types';
+	import { dismissable } from '$lib/actions/dismissable';
 	import { deviceStore } from '$lib/stores/devices.svelte';
 	import { groupStore } from '$lib/stores/groups.svelte';
 	import { scheduleStore } from '$lib/stores/schedules.svelte';
@@ -71,10 +72,9 @@
 	// ── Sleep timer ("turn off in N minutes") ──────────────────────────────────
 	// A quick affordance that schedules a one-shot 'off' rule computed client-side
 	// (the server owns firing, so it works with no browser open). The dropdown
-	// closes on an outside click or Escape via the svelte:window handlers.
+	// closes on an outside click or Escape via the dismissable action.
 	const TIMER_PRESETS = [15, 30, 60] as const;
 	let timerOpen = $state(false);
-	let timerBox = $state<HTMLDivElement | null>(null);
 
 	/** Local 'YYYY-MM-DDTHH:MM' this many minutes from now (what the 'once' kind wants). */
 	function inMinutes(mins: number): string {
@@ -94,19 +94,11 @@
 		// create() toasts on failure; confirm success here.
 		if (created) toasts.push(`${device.alias} will turn off in ${mins} min`, 'info');
 	}
-
-	function onTimerWindowClick(e: MouseEvent) {
-		if (timerOpen && timerBox && !timerBox.contains(e.target as Node)) timerOpen = false;
-	}
-	function onTimerWindowKey(e: KeyboardEvent) {
-		if (e.key === 'Escape') timerOpen = false;
-	}
 </script>
 
 <!-- A known-but-unreachable device renders as a grayed, non-interactive card with
 	only a retry affordance; the live card below is bypassed entirely so none of its
 	controls (toggle, brightness, color, energy) are reachable. -->
-<svelte:window onclick={onTimerWindowClick} onkeydown={onTimerWindowKey} />
 
 {#if !device.reachable}
 	<UnreachableCard {device} {delay} />
@@ -181,7 +173,7 @@
 			<div class="flex shrink-0 items-center gap-2">
 				{#if live}
 					<!-- Sleep timer: schedule a one-shot "turn off in N min" (server-side). -->
-					<div class="relative" bind:this={timerBox}>
+					<div class="relative" use:dismissable={() => (timerOpen = false)}>
 						<button
 							type="button"
 							onclick={() => (timerOpen = !timerOpen)}

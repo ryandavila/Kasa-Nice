@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import type { EnergyInsights } from '$lib/api/types';
 	import { getEnergyInsights } from '$lib/api/client';
+	import { fmt, fmtMoney as fmtMoneyBase } from '$lib/format';
 	import Icon from './Icon.svelte';
 
 	// Cost display mirrors the parent panel: the flat rate (null hides money) and
@@ -21,13 +22,7 @@
 		}
 	});
 
-	function fmt(v: number | null, digits = 2): string {
-		return v == null ? '—' : v.toFixed(digits);
-	}
-
-	function fmtMoney(v: number | null): string {
-		return v == null ? '—' : currency + v.toFixed(2);
-	}
+	const fmtMoney = (v: number | null) => fmtMoneyBase(v, currency);
 
 	// Week-over-week change vs last week. Null when last week has no data (a
 	// percentage off a zero baseline is meaningless), so the UI shows a plain total.

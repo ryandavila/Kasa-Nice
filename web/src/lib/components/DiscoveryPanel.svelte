@@ -1,9 +1,10 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import type { Device } from '$lib/api/types';
+	import { configStore } from '$lib/stores/config.svelte';
 	import { deviceStore } from '$lib/stores/devices.svelte';
 	import { toasts } from '$lib/stores/toasts.svelte';
-	import { ApiError, getConfig } from '$lib/api/client';
+	import { errorMessage } from '$lib/api/client';
 	import Icon from './Icon.svelte';
 	import DeviceCard from './DeviceCard.svelte';
 
@@ -15,12 +16,9 @@
 	let searched = $state(false);
 
 	onMount(async () => {
-		try {
-			const cfg = await getConfig();
-			if (cfg.scan_subnet) subnet = cfg.scan_subnet;
-		} catch {
-			// config is best-effort; the field just starts empty
-		}
+		// Config is best-effort; the field just starts empty when it can't load.
+		await configStore.load();
+		if (!subnet && configStore.scanSubnet) subnet = configStore.scanSubnet;
 	});
 
 	function report(devices: Device[]) {
@@ -35,7 +33,7 @@
 	}
 
 	function fail(e: unknown, fallback: string) {
-		toasts.push(e instanceof ApiError ? e.message : fallback, 'error');
+		toasts.push(errorMessage(e, fallback), 'error');
 		found = [];
 		searched = true;
 	}

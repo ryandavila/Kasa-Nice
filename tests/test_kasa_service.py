@@ -174,7 +174,7 @@ def test_get_usage_unknown_device():
 
 
 def test_read_energy_snapshot_matches_get_usage_scalars():
-    # The snapshot's three scalars must equal what get_usage would report, so the
+    # The snapshot's scalars must equal what get_usage would report, so the
     # recorded history is identical — just without the wasted stats-table fetches.
     reg = DeviceRegistry()
     reg._devices = {"10.0.0.7": FakeDevice("10.0.0.7", has_energy=True)}
@@ -184,7 +184,6 @@ def test_read_energy_snapshot_matches_get_usage_scalars():
 
     assert snapshot.power_w == usage.current_power_w == 12.5
     assert snapshot.today_kwh == usage.today_kwh == 0.3
-    assert snapshot.month_kwh == usage.month_kwh == 4.2
 
 
 def test_read_energy_snapshot_never_fetches_stats_tables():
@@ -473,7 +472,7 @@ def test_discovery_migrates_ip_keyed_group_and_history(tmp_path, fake_discover):
     room = gs.create_group("Living Room")
     gs.update_group(room["id"], device_ids=["10.0.0.5"])
     gs.set_favorites(["10.0.0.5"])
-    hs.record("10.0.0.5", 5.0, 0.1, 1.0)
+    hs.record("10.0.0.5", 5.0, 0.1)
 
     fake_discover.broadcast = {
         "10.0.0.5": FakeDevice("10.0.0.5", mac="AA:BB:CC:DD:EE:01")

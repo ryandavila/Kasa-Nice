@@ -1,11 +1,11 @@
-import { getRecentAlerts, getAlertThresholds, setAlertThresholds, ApiError } from '$lib/api/client';
+import {
+	getRecentAlerts,
+	getAlertThresholds,
+	setAlertThresholds,
+	errorMessage as message
+} from '$lib/api/client';
 import type { Alert } from '$lib/api/types';
 import { toasts } from './toasts.svelte';
-
-function message(e: unknown): string {
-	if (e instanceof ApiError) return e.message;
-	return e instanceof Error ? e.message : 'Something went wrong';
-}
 
 // The newest alert id the user has seen, persisted so the unseen badge survives
 // reloads. Read defensively — private-mode / disabled storage just means the

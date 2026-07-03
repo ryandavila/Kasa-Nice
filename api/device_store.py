@@ -15,12 +15,24 @@ logger = get_logger(__name__)
 
 
 class HostStore:
-    """Reads and writes the set of known device hosts to a JSON file."""
+    """Reads and writes the set of known device hosts to a JSON file.
+
+    ``load`` is served from memory after the first disk read (refreshed by
+    ``save``): the SSE stream consults the known-host set on every frame, and
+    this process is the file's only writer, so re-reading it each time would be
+    a sync disk read + JSON parse on the event loop every few seconds.
+    """
 
     def __init__(self, path: Path) -> None:
         self.path = path
+        self._cache: set[str] | None = None
 
     def load(self) -> set[str]:
+        if self._cache is None:
+            self._cache = self._read()
+        return set(self._cache)
+
+    def _read(self) -> set[str]:
         try:
             data = json.loads(self.path.read_text())
         except FileNotFoundError:
@@ -31,6 +43,8 @@ class HostStore:
         return {str(h) for h in data} if isinstance(data, list) else set()
 
     def save(self, hosts: set[str]) -> None:
+        # The in-process view stays authoritative even if the disk write fails.
+        self._cache = set(hosts)
         try:
             atomic_write_text(self.path, json.dumps(sorted(hosts), indent=2))
         except OSError as e:

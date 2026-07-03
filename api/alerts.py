@@ -21,7 +21,6 @@ threshold and re-arms once draw drops back below it.
 
 import asyncio
 import json
-import sqlite3
 import time
 import uuid
 from collections import deque
@@ -283,44 +282,20 @@ async def deliver_webhook(
     return True
 
 
-def latest_power_readings(db_path: Path, *, now: int | None = None) -> dict[str, float]:
-    """Latest non-null power (watts) per device from the energy-history samples DB.
-
-    Reads the same SQLite DB the recorder writes (``KASA_ENERGY_HISTORY_FILE``)
-    directly, rather than through ``EnergyHistoryStore`` which has no
-    "latest per device" query — a candidate to consolidate into that store later.
-    Own connection per call (safe across threads); a missing DB/table degrades to
-    an empty map. Rows older than ``_POWER_STALENESS_SECONDS`` are ignored so a
-    long-gone device can't trip a wattage alert from a stale reading.
-    """
-    now = int(time.time()) if now is None else now
-    cutoff = now - _POWER_STALENESS_SECONDS
-    try:
-        with sqlite3.connect(db_path) as conn:
-            rows = conn.execute(
-                "SELECT device_id, power_w FROM samples AS s "
-                "WHERE power_w IS NOT NULL AND ts >= ? AND ts = ("
-                "  SELECT MAX(ts) FROM samples WHERE device_id = s.device_id "
-                "  AND power_w IS NOT NULL AND ts >= ?)",
-                (cutoff, cutoff),
-            ).fetchall()
-    except sqlite3.Error as e:
-        logger.debug(f"Could not read power samples for alerts: {e}")
-        return {}
-    return {str(device_id): float(power) for device_id, power in rows}
-
-
-def collect_readings(registry, db_path: Path) -> list[DeviceReading]:
-    """Assemble this cycle's per-device readings from the registry and samples DB.
+def collect_readings(registry, history) -> list[DeviceReading]:
+    """Assemble this cycle's per-device readings from the registry and history.
 
     Reachability comes from the registry: ``unreachable_devices()`` are the
     known-but-offline ones, and a cached device that keeps failing its refresh
     reports ``is_reachable(...) == False`` (so a mid-session outage is seen, not
-    just a device missing at discovery). Power is the latest recorded sample.
+    just a device missing at discovery). Power is the latest recorded sample
+    from the ``EnergyHistoryStore``; readings older than
+    ``_POWER_STALENESS_SECONDS`` are ignored so a long-gone device can't trip a
+    wattage alert from a stale row.
     """
     from .kasa_service import stable_device_id
 
-    powers = latest_power_readings(db_path)
+    powers = history.latest_power_by_device(_POWER_STALENESS_SECONDS)
     readings: list[DeviceReading] = []
     for device in registry.all():
         device_id = stable_device_id(device)
@@ -344,7 +319,7 @@ async def run_alert_evaluator(
     thresholds: AlertThresholdStore,
     *,
     interval: float,
-    db_path: Path,
+    history,
     webhook_url: str | None = None,
     deliver: Callable[[str, Alert], Awaitable[bool]] = deliver_webhook,
 ) -> None:
@@ -359,16 +334,16 @@ async def run_alert_evaluator(
     Cycles are skipped while the registry is mid-discovery (startup sweep or a
     manual rediscover): evaluating a half-populated registry would seed every
     known device as unreachable and then fire a spurious "recovered" alert (and
-    webhook) for each once discovery finishes. Each evaluated cycle starts with a
-    ``refresh_all()`` so reachability edges are seen even with no browser open
-    (the SSE loop, the only other refresher, runs only while a client is
-    subscribed); the refresh honours the registry's cloud poll throttle.
+    webhook) for each once discovery finishes. Each evaluated cycle starts with
+    a staleness-gated refresh so reachability edges are seen even with no
+    browser open, without duplicating the SSE loop's 5s refresh when one IS
+    open; the refresh honours the registry's cloud poll throttle.
     """
     while True:
         try:
             if not getattr(registry, "discovering", False):
-                await registry.refresh_all()
-                readings = collect_readings(registry, db_path)
+                await registry.refresh_all_if_stale(interval / 2)
+                readings = collect_readings(registry, history)
                 for draft in evaluator.evaluate(readings, thresholds.get_all()):
                     alert = center.emit(draft)
                     logger.info(f"Alert: {alert.message}")

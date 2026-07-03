@@ -29,9 +29,11 @@ from .routers import (
     groups_router,
     scenes_router,
     schedules_router,
+    vacation_router,
 )
 from .schedule_store import schedules
 from .scheduler import run_scheduler
+from .vacation import engine as vacation_engine
 
 logger = get_logger(__name__)
 
@@ -97,7 +99,11 @@ async def lifespan(app: FastAPI):
                 webhook_url=settings.kasa_alert_webhook_url,
             )
         )
-        tasks = (discovery, recorder, scheduler, alerts)
+        # Presence simulation ("vacation mode"): while enabled in its config,
+        # randomize a set of lights within a nightly window so the home looks
+        # occupied. Idle (a cheap no-op tick) until the user turns it on.
+        vacation = asyncio.create_task(vacation_engine.run())
+        tasks = (discovery, recorder, scheduler, alerts, vacation)
     yield
     for task in tasks:
         task.cancel()
@@ -136,6 +142,7 @@ def create_app() -> FastAPI:
     app.include_router(schedules_router)
     app.include_router(alerts_router)
     app.include_router(backup_router)
+    app.include_router(vacation_router)
     app.include_router(events_router)
 
     if WEB_BUILD_DIR.is_dir():

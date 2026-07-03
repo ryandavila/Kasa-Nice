@@ -86,6 +86,10 @@ class Settings(BaseSettings):
     kasa_alerts_file: Path = Path("data/alerts.json")
     # Named scenes: a saved per-device state applied as one action.
     kasa_scenes_file: Path = Path("data/scenes.json")
+    # Vacation (presence-simulation) config: which lights to fake-occupy, the
+    # active window, and the per-device switch interval. One small JSON file like
+    # the others so the single config document can be hand-edited or volume-mounted.
+    kasa_vacation_file: Path = Path("data/vacation.json")
 
     # ── Energy history / cost ────────────────────────────────────────────────
     kasa_energy_sample_interval: float = _DEFAULT_ENERGY_SAMPLE_INTERVAL

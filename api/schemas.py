@@ -677,3 +677,87 @@ class BackupDocument(BaseModel):
                 f"version {CURRENT_BACKUP_VERSION}"
             )
         return v
+
+
+# ── Vacation mode (presence simulation) ─────────────────────────────────────
+
+
+class VacationConfig(BaseModel):
+    """User-controlled presence-simulation settings.
+
+    A single config document (not a list), so the API is GET/PUT of the whole
+    thing like ``Favorites`` — there's only ever one vacation policy. The engine
+    resolves ``room_ids`` to their member devices at run time (so rooms edited
+    while vacation mode runs are honoured) and unions them with ``device_ids``.
+
+    Times are local wall-clock 'HH:MM'. ``start_time`` is optional: when null the
+    engine begins the active window at sunset for the server's configured location
+    (falling back to a fixed 19:00 when no location is set), so the lights come on
+    as dusk shifts through the year without the user re-editing it.
+    """
+
+    enabled: bool = False
+    device_ids: list[str] = Field(
+        default_factory=list,
+        description="Individual device ids to include in the simulation.",
+    )
+    room_ids: list[str] = Field(
+        default_factory=list,
+        description="Room (group) ids; resolved to their member devices at run time.",
+    )
+    # Null => start at sunset (or 19:00 when no location is configured).
+    start_time: str | None = Field(
+        default=None,
+        pattern=_HHMM,
+        description="Local 'HH:MM' the active window opens; null = sunset/19:00.",
+    )
+    end_time: str = Field(
+        default="23:00",
+        pattern=_HHMM,
+        description="Local 'HH:MM' the window closes; everything is turned off then.",
+    )
+    # Randomized per-device gap between switches. Floored well above the SSE
+    # cadence so a switch is always observable and can't busy-loop the engine.
+    min_interval_minutes: int = Field(
+        default=15,
+        ge=1,
+        description="Minimum minutes between switches for a single device.",
+    )
+    max_interval_minutes: int = Field(
+        default=45,
+        ge=1,
+        description="Maximum minutes between switches for a single device.",
+    )
+
+    @model_validator(mode="after")
+    def _validate_intervals(self) -> VacationConfig:
+        # A max below the min would make the per-device gap draw empty; keep them
+        # coherent so the engine's ``uniform(min, max)`` is always well-formed.
+        _require(
+            self.max_interval_minutes >= self.min_interval_minutes,
+            "max_interval_minutes must be >= min_interval_minutes",
+        )
+        return self
+
+
+class VacationStatus(VacationConfig):
+    """The stored config plus live, server-derived engine state (read-only).
+
+    Extends the editable config so the single GET returns everything the UI needs
+    in one shape. ``active`` is whether the current time is inside the resolved
+    window (and mode is enabled); ``next_switch_ts`` is the soonest planned
+    per-device toggle the engine has scheduled, or null when idle.
+    """
+
+    active: bool = Field(
+        default=False,
+        description="True when enabled and the current local time is in the window.",
+    )
+    next_switch_ts: int | None = Field(
+        default=None,
+        description="Unix epoch seconds of the next planned switch, or null if idle.",
+    )
+    resolved_device_ids: list[str] = Field(
+        default_factory=list,
+        description="device_ids unioned with the current members of room_ids.",
+    )

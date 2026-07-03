@@ -10,12 +10,18 @@
 	import RoomsView from '$lib/components/RoomsView.svelte';
 	import ScenesView from '$lib/components/ScenesView.svelte';
 	import SchedulesView from '$lib/components/SchedulesView.svelte';
+	import VacationSettings from '$lib/components/VacationSettings.svelte';
 	import ThemeToggle from '$lib/components/ThemeToggle.svelte';
 	import AlertsBell from '$lib/components/AlertsBell.svelte';
 	import SettingsPanel from '$lib/components/SettingsPanel.svelte';
+	import { vacationStore } from '$lib/stores/vacation.svelte';
 
-	type Tab = 'devices' | 'energy' | 'scenes' | 'schedules' | 'discovery';
+	type Tab = 'devices' | 'energy' | 'scenes' | 'schedules' | 'vacation' | 'discovery';
 	let tab = $state<Tab>('devices');
+
+	// Load vacation status up front so the header indicator is correct without
+	// opening its tab. Self-contained: the tab re-loads if opened first.
+	vacationStore.load();
 
 	// How the Devices tab groups cards: by device type (default) or by user room.
 	// Persisted so the choice survives reloads.
@@ -125,6 +131,19 @@
 				<Icon name="refresh" size={16} class={loading ? 'animate-spin' : ''} />
 				<span class="hidden sm:inline">Rediscover</span>
 			</button>
+			<!-- Subtle vacation-mode indicator: only shown while the simulation is
+			     actively running its window. Clicking jumps to its settings. -->
+			{#if vacationStore.active}
+				<button
+					type="button"
+					onclick={() => (tab = 'vacation')}
+					title="Vacation mode is active — lights are being simulated"
+					class="flex h-10 items-center gap-1.5 rounded-full border border-accent/40 bg-accent-soft px-3 text-sm font-medium text-accent-ink"
+				>
+					<Icon name="moon" size={15} />
+					<span class="hidden sm:inline">Vacation</span>
+				</button>
+			{/if}
 			<AlertsBell />
 			<SettingsPanel />
 			<ThemeToggle />
@@ -133,7 +152,7 @@
 
 	<!-- ── Tabs ───────────────────────────────────────────────────────────── -->
 	<nav class="mb-8 inline-flex rounded-full border border-line bg-surface/70 p-1">
-		{#each [{ id: 'devices', label: 'Devices' }, { id: 'energy', label: 'Energy' }, { id: 'scenes', label: 'Scenes' }, { id: 'schedules', label: 'Schedules' }, { id: 'discovery', label: 'Discovery' }] as t (t.id)}
+		{#each [{ id: 'devices', label: 'Devices' }, { id: 'energy', label: 'Energy' }, { id: 'scenes', label: 'Scenes' }, { id: 'schedules', label: 'Schedules' }, { id: 'vacation', label: 'Vacation' }, { id: 'discovery', label: 'Discovery' }] as t (t.id)}
 			<button
 				type="button"
 				onclick={() => (tab = t.id as Tab)}
@@ -266,6 +285,8 @@
 		<ScenesView />
 	{:else if tab === 'schedules'}
 		<SchedulesView />
+	{:else if tab === 'vacation'}
+		<VacationSettings />
 	{:else}
 		<DiscoveryPanel />
 	{/if}

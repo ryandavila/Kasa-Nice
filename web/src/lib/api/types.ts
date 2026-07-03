@@ -365,3 +365,37 @@ export interface BackupDocument {
 	alert_thresholds: Record<string, number>;
 	known_devices: KnownDevice[];
 }
+
+// ── Vacation mode (presence simulation) ─────────────────────────────────────
+
+/**
+ * Presence-simulation settings: which lights to fake-occupy, the nightly active
+ * window, and the randomized per-device switch interval. A single config
+ * document (there's only one vacation policy), so the API is GET/PUT of the
+ * whole thing rather than by-id CRUD.
+ */
+export interface VacationConfig {
+	enabled: boolean;
+	/** Individual device ids included in the simulation. */
+	device_ids: string[];
+	/** Room ids; resolved to their member devices at run time. */
+	room_ids: string[];
+	/** Local 'HH:MM' the window opens; null = sunset (or 19:00 with no location). */
+	start_time: string | null;
+	/** Local 'HH:MM' the window closes; everything is turned off then. */
+	end_time: string;
+	/** Minimum minutes between switches for a single device. */
+	min_interval_minutes: number;
+	/** Maximum minutes between switches for a single device. */
+	max_interval_minutes: number;
+}
+
+/** The stored config plus live, server-derived engine status (read-only fields). */
+export interface VacationStatus extends VacationConfig {
+	/** True when enabled and the current local time is inside the window. */
+	active: boolean;
+	/** Unix epoch seconds of the next planned switch, or null when idle. */
+	next_switch_ts: number | null;
+	/** device_ids unioned with the current members of room_ids. */
+	resolved_device_ids: string[];
+}

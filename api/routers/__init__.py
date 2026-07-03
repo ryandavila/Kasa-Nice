@@ -14,6 +14,7 @@ from .energy import router as energy_router
 from .groups import router as groups_router
 from .scenes import router as scenes_router
 from .schedules import router as schedules_router
+from .vacation import router as vacation_router
 
 __all__ = [
     "_validated_rows",
@@ -24,4 +25,5 @@ __all__ = [
     "groups_router",
     "scenes_router",
     "schedules_router",
+    "vacation_router",
 ]

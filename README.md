@@ -95,6 +95,7 @@ All endpoints are under `/api`; interactive docs live at `http://localhost:8080/
 | `GET`  | `/api/backup` | Download every JSON store as one versioned document (see [Backup & restore](#backup--restore)) |
 | `POST` | `/api/backup/restore` | Replace every JSON store's contents from a backup document; validated whole, no partial writes |
 | `GET`  | `/api/backup/energy.db` | Download a consistent snapshot of the energy-history SQLite database |
+| `GET` / `PUT` | `/api/vacation` | Read / full-replace the vacation-mode (presence-simulation) config; GET also returns live status (`active`, `next_switch_ts`, `resolved_device_ids`) — see [Vacation mode](#vacation-mode) |
 
 ## Configuration
 
@@ -108,6 +109,7 @@ All endpoints are under `/api`; interactive docs live at `http://localhost:8080/
 | `KASA_SCHEDULES_FILE` | `data/schedules.json` | Where schedule (timer) rules are persisted |
 | `KASA_SCENES_FILE` | `data/scenes.json` | Where scenes (saved per-device states) are persisted |
 | `KASA_ALERTS_FILE` | `data/alerts.json` | Where per-device power-draw alert thresholds are persisted |
+| `KASA_VACATION_FILE` | `data/vacation.json` | Where the vacation-mode (presence-simulation) config is persisted |
 | `KASA_ALERT_INTERVAL` | `60` | Seconds between alert evaluations (min `10`) |
 | `KASA_ALERT_WEBHOOK_URL` | _(unset)_ | Optional URL each alert is POSTed to ([ntfy](https://ntfy.sh)-compatible); leave unset for in-app alerts only — see [Alerts](#alerts) |
 | `KASA_ENERGY_SAMPLE_INTERVAL` | `300` | Seconds between energy-history samples (min `10`). Higher = fewer reads, coarser history |
@@ -281,6 +283,32 @@ own online backup API) so a download can't catch the file mid-write while the
 energy recorder is running. There's currently no restore path for it — recorded
 history is meant to be downloaded for your own analysis/archival, not
 round-tripped back into the server.
+### Vacation mode
+
+Presence simulation: while enabled, the server randomly switches a configured
+set of lights on and off inside a nightly window so an empty home looks
+occupied. A background task (running alongside the scheduler) picks each device's
+switch times independently — jittered per device — so the pattern never reads as
+mechanical, and turns everything off when the window closes.
+
+Configure it from the **Vacation** tab, or via `GET`/`PUT /api/vacation`:
+
+- **Targets** — any mix of individual devices and rooms; rooms are resolved to
+  their current members at run time, so editing a room updates the simulation.
+- **Active window** — the `end_time` is a fixed local `HH:MM` (default `23:00`);
+  the `start_time` may be a fixed `HH:MM` or left unset to begin at **sunset**
+  for the server's configured location (`KASA_LATITUDE`/`KASA_LONGITUDE`),
+  falling back to a fixed `19:00` when no location is set.
+- **Interval** — each light waits a random gap between `min_interval_minutes` and
+  `max_interval_minutes` (default 15–45) between its switches.
+
+Vacation mode never fights you or your schedules: if a light's state changes from
+another source (a schedule rule, the Kasa app, a wall switch) between its planned
+switches, the simulation adopts that state and leaves the light alone for a short
+cooldown instead of yanking it back. The config is stored at `KASA_VACATION_FILE`
+(default `data/vacation.json`); `GET /api/vacation` also returns whether the
+window is currently `active` and the `next_switch_ts` of the soonest planned
+toggle, which the header's vacation indicator reflects.
 
 ## Project Structure
 

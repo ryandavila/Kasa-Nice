@@ -18,7 +18,9 @@ import type {
 	ScheduleUpdate,
 	ServerConfig,
 	ServerStatus,
-	Usage
+	Usage,
+	VacationConfig,
+	VacationStatus
 } from './types';
 
 /**
@@ -259,3 +261,10 @@ export const downloadBackupFile = () => downloadFile('/backup', 'kasa-nice-backu
 /** Download a consistent snapshot of the energy-history SQLite database. */
 export const downloadEnergyDb = () =>
 	downloadFile('/backup/energy.db', 'kasa-nice-energy-history.db');
+// ── Vacation mode (presence simulation) ─────────────────────────────────────
+
+/** Read the vacation config plus live engine status (active + next switch). */
+export const getVacation = () => request<VacationStatus>('/vacation');
+
+/** Full-replace the vacation config; returns the saved config with fresh status. */
+export const setVacation = (config: VacationConfig) => put<VacationStatus>('/vacation', config);

@@ -292,4 +292,49 @@ describe('merge with sparse SSE frames', () => {
 		resolve(makeDevice({ is_on: true }));
 		await pending;
 	});
+
+	it('applies a rename pushed from another client (device and outlet alias)', () => {
+		// Regression: merge only copied power/light state, so a rename pushed via
+		// the SSE stream never reached other open tabs until a full reload.
+		const d = strip();
+		deviceStore.devices = [d];
+		const renamed = strip();
+		renamed.alias = 'Desk Strip';
+		renamed.children[0].alias = 'Hot Air Station';
+		// @ts-expect-error - exercise the private merge directly
+		deviceStore.merge([renamed]);
+		expect(deviceStore.devices[0].alias).toBe('Desk Strip');
+		expect(deviceStore.devices[0].children[0].alias).toBe('Hot Air Station');
+	});
+
+	it('restores capability flags when a blanked snapshot placeholder recovers', () => {
+		// Regression: a device first served as an unreachable snapshot has its
+		// capabilities blanked server-side; on recovery merge must restore them or
+		// a color bulb stays a bare on/off card until reload.
+		const placeholder = makeDevice({
+			reachable: false,
+			is_on: false,
+			is_color: false,
+			is_dimmable: false,
+			has_emeter: false,
+			brightness: null,
+			hsv: null
+		});
+		deviceStore.devices = [placeholder];
+		// @ts-expect-error - exercise the private merge directly
+		deviceStore.merge([makeDevice({ is_on: true })]); // the live device returns
+		const cur = deviceStore.devices[0];
+		expect(cur.reachable).toBe(true);
+		expect(cur.is_dimmable).toBe(true);
+		expect(cur.is_color).toBe(true);
+		expect(cur.brightness).toBe(40);
+	});
+
+	it('adopts children a childless placeholder gains on recovery', () => {
+		const placeholder = { ...strip(), reachable: false, children: [] };
+		deviceStore.devices = [placeholder];
+		// @ts-expect-error - exercise the private merge directly
+		deviceStore.merge([strip()]);
+		expect(deviceStore.devices[0].children.map((c) => c.id)).toEqual(['STRIP_00']);
+	});
 });

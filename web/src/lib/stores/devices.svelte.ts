@@ -69,14 +69,23 @@ class DeviceStore {
 				this.devices.push(f);
 				continue;
 			}
-			cur.is_on = f.is_on;
-			cur.brightness = f.brightness;
-			cur.hsv = f.hsv;
-			// Keep reachable current so a device grays out / re-lights in place.
-			cur.reachable = f.reachable;
-			for (const fc of f.children) {
+			// Copy every server-owned field, not just power/light state: alias so a
+			// rename in another tab (pushed via publish_now) lands here, capability
+			// flags so a device first seen as a blanked unreachable snapshot regains
+			// its controls on recovery, and reachable so cards gray / re-light in
+			// place. Children are merged by id below to keep object identity for
+			// keyed each-blocks, so they're excluded from the assign.
+			const { children, ...fields } = f;
+			Object.assign(cur, fields);
+			for (const fc of children) {
 				const cc = cur.children.find((c) => c.id === fc.id);
-				if (cc) cc.is_on = fc.is_on;
+				if (cc) {
+					cc.is_on = fc.is_on;
+					cc.alias = fc.alias;
+				} else {
+					// e.g. a strip recovering from a childless placeholder snapshot.
+					cur.children.push(fc);
+				}
 			}
 		}
 	}

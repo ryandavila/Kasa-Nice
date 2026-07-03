@@ -11,6 +11,7 @@ import uuid
 from pathlib import Path
 
 from .config import get_settings
+from .fsutil import atomic_write_text
 from .logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -56,8 +57,7 @@ class GroupStore:
 
     def _write(self, data: dict) -> None:
         try:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            self.path.write_text(json.dumps(data, indent=2))
+            atomic_write_text(self.path, json.dumps(data, indent=2))
         except OSError as e:
             logger.warning(f"Could not write group store {self.path}: {e}")
 

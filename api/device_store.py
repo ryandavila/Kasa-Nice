@@ -8,6 +8,7 @@ JSON file so they can be re-probed on startup.
 import json
 from pathlib import Path
 
+from .fsutil import atomic_write_text
 from .logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -31,8 +32,7 @@ class HostStore:
 
     def save(self, hosts: set[str]) -> None:
         try:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            self.path.write_text(json.dumps(sorted(hosts), indent=2))
+            atomic_write_text(self.path, json.dumps(sorted(hosts), indent=2))
         except OSError as e:
             logger.warning(f"Could not write host store {self.path}: {e}")
 
@@ -72,8 +72,9 @@ class DeviceSnapshotStore:
 
     def save(self, snapshots: dict[str, dict]) -> None:
         try:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
             # Sorted by host for a stable, diff-friendly file.
-            self.path.write_text(json.dumps(dict(sorted(snapshots.items())), indent=2))
+            atomic_write_text(
+                self.path, json.dumps(dict(sorted(snapshots.items())), indent=2)
+            )
         except OSError as e:
             logger.warning(f"Could not write snapshot store {self.path}: {e}")

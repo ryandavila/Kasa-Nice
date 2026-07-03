@@ -3,18 +3,14 @@
 Lets the user organize the flat device list into named rooms and star favorites.
 A pure UI concern, decoupled from discovery: entries reference stable device ids
 (see ``stable_device_id``) and may name an offline or absent device, which is
-intended. Stored in one small JSON file, tolerant load/save like ``HostStore``.
+intended. Stored in one small JSON file with the tolerant load / atomic save of
+``JsonDocumentStore``.
 """
 
-import json
 import uuid
-from pathlib import Path
 
 from .config import get_settings
-from .fsutil import atomic_write_text
-from .logging_config import get_logger
-
-logger = get_logger(__name__)
+from .json_store import JsonDocumentStore
 
 
 def _dedupe(ids: list[str]) -> list[str]:
@@ -28,24 +24,17 @@ def _dedupe(ids: list[str]) -> list[str]:
     return out
 
 
-class GroupStore:
+class GroupStore(JsonDocumentStore):
     """Reads and writes device groups and favorites to a JSON file."""
 
-    def __init__(self, path: Path) -> None:
-        self.path = path
+    _label = "group store"
 
-    def _read(self) -> dict:
-        """Load the raw document, degrading to an empty one on any problem."""
-        empty: dict = {"groups": [], "favorites": []}
-        try:
-            data = json.loads(self.path.read_text())
-        except FileNotFoundError:
-            return empty
-        except (OSError, ValueError) as e:
-            logger.warning(f"Could not read group store {self.path}: {e}")
-            return empty
+    def _empty(self) -> dict:
+        return {"groups": [], "favorites": []}
+
+    def _coerce(self, data: object) -> dict:
         if not isinstance(data, dict):
-            return empty
+            return self._empty()
         groups = data.get("groups")
         favorites = data.get("favorites")
         return {
@@ -54,12 +43,6 @@ class GroupStore:
             if isinstance(favorites, list)
             else [],
         }
-
-    def _write(self, data: dict) -> None:
-        try:
-            atomic_write_text(self.path, json.dumps(data, indent=2))
-        except OSError as e:
-            logger.warning(f"Could not write group store {self.path}: {e}")
 
     def list_groups(self) -> list[dict]:
         return self._read()["groups"]

@@ -4,9 +4,10 @@ A rule says "at HH:MM on {days}, turn {a device|a room} {on|off}". Rules live on
 the server so they fire for both local and cloud devices and keep running with no
 browser open — the frontend is just an editor over this store.
 
-One small JSON file, tolerant load/save like ``GroupStore`` (a read problem
-degrades to an empty document). Rule *shape* is validated at the API boundary
-(``schemas.py``); this layer just persists dicts and does id bookkeeping.
+One small JSON file with the tolerant load / atomic save of ``JsonDocumentStore``
+(a read problem degrades to an empty document). Rule *shape* is validated at the
+API boundary (``schemas.py``); this layer just persists dicts and does id
+bookkeeping.
 
 Rules carry a ``kind`` discriminator (``"fixed_time"``, ``"sunrise"``,
 ``"sunset"``, or ``"once"``). Since this store passes dicts through untouched, a
@@ -15,44 +16,26 @@ downgrade intact instead of being dropped, and an old v1 file (fixed_time rules
 with none of the newer fields) loads and round-trips unchanged.
 """
 
-import json
 import uuid
-from pathlib import Path
 from typing import Any
 
 from .config import get_settings
-from .fsutil import atomic_write_text
-from .logging_config import get_logger
-
-logger = get_logger(__name__)
+from .json_store import JsonDocumentStore
 
 
-class ScheduleStore:
+class ScheduleStore(JsonDocumentStore):
     """Reads and writes schedule rules to a JSON file."""
 
-    def __init__(self, path: Path) -> None:
-        self.path = path
+    _label = "schedule store"
 
-    def _read(self) -> dict:
-        """Load the raw document, degrading to an empty one on any problem."""
-        empty: dict = {"schedules": []}
-        try:
-            data = json.loads(self.path.read_text())
-        except FileNotFoundError:
-            return empty
-        except (OSError, ValueError) as e:
-            logger.warning(f"Could not read schedule store {self.path}: {e}")
-            return empty
+    def _empty(self) -> dict:
+        return {"schedules": []}
+
+    def _coerce(self, data: object) -> dict:
         if not isinstance(data, dict):
-            return empty
+            return self._empty()
         schedules = data.get("schedules")
         return {"schedules": schedules if isinstance(schedules, list) else []}
-
-    def _write(self, data: dict) -> None:
-        try:
-            atomic_write_text(self.path, json.dumps(data, indent=2))
-        except OSError as e:
-            logger.warning(f"Could not write schedule store {self.path}: {e}")
 
     def list_rules(self) -> list[dict]:
         return self._read()["schedules"]

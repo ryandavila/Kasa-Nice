@@ -5,49 +5,31 @@ A scene is a saved per-device state ("entries") applied as one action — e.g.
 it's a UI convenience decoupled from discovery: entries reference stable device
 ids and may name a device that's momentarily offline.
 
-One small JSON file, tolerant load/save like ``GroupStore``/``ScheduleStore`` (a
-read problem degrades to an empty document). Entry *shape* is validated at the
+One small JSON file with the tolerant load / atomic save of ``JsonDocumentStore``
+(a read problem degrades to an empty document). Entry *shape* is validated at the
 API boundary (``schemas.py``); this layer just persists dicts and does id
 bookkeeping, so it passes entries through untouched.
 """
 
-import json
 import uuid
-from pathlib import Path
 
 from .config import get_settings
-from .fsutil import atomic_write_text
-from .logging_config import get_logger
-
-logger = get_logger(__name__)
+from .json_store import JsonDocumentStore
 
 
-class SceneStore:
+class SceneStore(JsonDocumentStore):
     """Reads and writes scenes to a JSON file."""
 
-    def __init__(self, path: Path) -> None:
-        self.path = path
+    _label = "scene store"
 
-    def _read(self) -> dict:
-        """Load the raw document, degrading to an empty one on any problem."""
-        empty: dict = {"scenes": []}
-        try:
-            data = json.loads(self.path.read_text())
-        except FileNotFoundError:
-            return empty
-        except (OSError, ValueError) as e:
-            logger.warning(f"Could not read scene store {self.path}: {e}")
-            return empty
+    def _empty(self) -> dict:
+        return {"scenes": []}
+
+    def _coerce(self, data: object) -> dict:
         if not isinstance(data, dict):
-            return empty
+            return self._empty()
         scenes = data.get("scenes")
         return {"scenes": scenes if isinstance(scenes, list) else []}
-
-    def _write(self, data: dict) -> None:
-        try:
-            atomic_write_text(self.path, json.dumps(data, indent=2))
-        except OSError as e:
-            logger.warning(f"Could not write scene store {self.path}: {e}")
 
     def list_scenes(self) -> list[dict]:
         return self._read()["scenes"]

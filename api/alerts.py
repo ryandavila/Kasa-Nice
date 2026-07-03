@@ -20,19 +20,17 @@ threshold and re-arms once draw drops back below it.
 """
 
 import asyncio
-import json
 import time
 import uuid
 from collections import deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from pathlib import Path
 from typing import NamedTuple
 
 import httpx
 
 from .config import get_settings
-from .fsutil import atomic_write_text
+from .json_store import JsonDocumentStore
 from .logging_config import get_logger
 from .schemas import Alert, AlertType
 
@@ -160,16 +158,17 @@ class AlertEvaluator:
         return []
 
 
-class AlertThresholdStore:
+class AlertThresholdStore(JsonDocumentStore):
     """Per-device power-draw thresholds (device_id -> watts), one JSON file.
 
     A full-replace store like the favorites list: ``set_all`` overwrites the whole
     mapping. Tolerant load/save (a read problem degrades to empty), and only
     positive watt values are kept — a zero/negative threshold isn't meaningful.
+    The document on disk wraps the mapping under a ``"thresholds"`` key; the
+    store reads and returns just the inner mapping.
     """
 
-    def __init__(self, path: Path) -> None:
-        self.path = path
+    _label = "alert store"
 
     @staticmethod
     def _sanitize(raw: object) -> dict[str, float]:
@@ -186,25 +185,13 @@ class AlertThresholdStore:
                 clean[str(device_id)] = value
         return clean
 
-    def _read(self) -> dict[str, float]:
-        try:
-            data = json.loads(self.path.read_text())
-        except FileNotFoundError:
-            return {}
-        except (OSError, ValueError) as e:
-            logger.warning(f"Could not read alert store {self.path}: {e}")
-            return {}
+    def _empty(self) -> dict[str, float]:
+        return {}
+
+    def _coerce(self, data: object) -> dict[str, float]:
         return self._sanitize(
             data.get("thresholds") if isinstance(data, dict) else None
         )
-
-    def _write(self, thresholds: dict[str, float]) -> None:
-        try:
-            atomic_write_text(
-                self.path, json.dumps({"thresholds": thresholds}, indent=2)
-            )
-        except OSError as e:
-            logger.warning(f"Could not write alert store {self.path}: {e}")
 
     def get_all(self) -> dict[str, float]:
         return self._read()
@@ -212,7 +199,7 @@ class AlertThresholdStore:
     def set_all(self, thresholds: dict[str, float]) -> dict[str, float]:
         """Replace the whole mapping; returns the sanitized, persisted version."""
         clean = self._sanitize(thresholds)
-        self._write(clean)
+        self._write({"thresholds": clean})
         return clean
 
 

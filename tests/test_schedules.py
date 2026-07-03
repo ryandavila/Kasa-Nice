@@ -1,3 +1,4 @@
+import datetime
 import json
 
 import pytest
@@ -223,9 +224,54 @@ def test_api_create_sunset_with_location_ok(client, monkeypatch):
     assert body["time"] is None
 
 
+def _future_at(days: int = 1) -> str:
+    """A naive local 'YYYY-MM-DDTHH:MM' safely in the future."""
+    return (datetime.datetime.now() + datetime.timedelta(days=days)).strftime(
+        "%Y-%m-%dT%H:%M"
+    )
+
+
 def test_api_create_once_rule_shape(client, monkeypatch):
     _set_location(monkeypatch, None)  # once needs no location
+    at = _future_at()
     body = client.post(
+        "/api/schedules",
+        json={
+            "kind": "once",
+            "at": at,
+            "target": {"type": "device", "id": "10.0.0.1"},
+            "action": "on",
+        },
+    ).json()
+    assert body["kind"] == "once"
+    assert body["at"] == at
+    assert body["days"] == []
+
+
+@pytest.mark.parametrize(
+    "bad_at",
+    [
+        "not-a-datetime",
+        "2030-06-01T07:15+00:00",  # offset would be silently dropped by the match
+        "2030-06-01",  # date-only would silently mean midnight
+    ],
+)
+def test_api_create_once_rejects_bad_at(client, bad_at):
+    resp = client.post(
+        "/api/schedules",
+        json={
+            "kind": "once",
+            "at": bad_at,
+            "target": {"type": "device", "id": "10.0.0.1"},
+            "action": "on",
+        },
+    )
+    assert resp.status_code == 422
+
+
+def test_api_create_once_rejects_past_at(client):
+    # A one-shot in the past could only ever be marked "missed"; reject it.
+    resp = client.post(
         "/api/schedules",
         json={
             "kind": "once",
@@ -233,23 +279,62 @@ def test_api_create_once_rule_shape(client, monkeypatch):
             "target": {"type": "device", "id": "10.0.0.1"},
             "action": "on",
         },
-    ).json()
-    assert body["kind"] == "once"
-    assert body["at"] == "2024-06-01T07:15"
-    assert body["days"] == []
+    )
+    assert resp.status_code == 422
+    assert "past" in resp.json()["detail"].lower()
 
 
-def test_api_create_once_rejects_bad_at(client):
-    resp = client.post(
+def test_api_patch_validates_merged_rule_before_persisting(client, store):
+    """An incoherent patch must not reach the file.
+
+    Regression: the merge was persisted before cross-field validation, so one
+    bad PATCH (e.g. kind=once with no 'at') 500'd every subsequent GET until
+    the JSON file was repaired by hand.
+    """
+    sid = client.post("/api/schedules", json=_payload()).json()["id"]
+
+    resp = client.patch(f"/api/schedules/{sid}", json={"kind": "once"})
+    assert resp.status_code == 422
+
+    # The stored rule is untouched and the collection still serves.
+    assert store.get_rule(sid)["kind"] == "fixed_time"
+    listing = client.get("/api/schedules")
+    assert listing.status_code == 200
+    assert listing.json()[0]["kind"] == "fixed_time"
+
+
+def test_api_patch_to_sun_kind_requires_location(client, monkeypatch):
+    """PATCH can't sneak in what POST rejects: a sun rule with no location."""
+    _set_location(monkeypatch, None)
+    sid = client.post("/api/schedules", json=_payload()).json()["id"]
+    resp = client.patch(f"/api/schedules/{sid}", json={"kind": "sunset", "time": None})
+    assert resp.status_code == 422
+    assert "location" in resp.json()["detail"].lower()
+
+
+def test_api_patch_enable_toggle_skips_fireability_recheck(client, monkeypatch):
+    """Toggling ``enabled`` on an old one-shot must not 422 on its past 'at'.
+
+    The scheduler will mark it missed; the PATCH itself only touches ``enabled``.
+    """
+    _set_location(monkeypatch, None)
+    at = _future_at()
+    sid = client.post(
         "/api/schedules",
         json={
             "kind": "once",
-            "at": "not-a-datetime",
+            "at": at,
             "target": {"type": "device", "id": "10.0.0.1"},
             "action": "on",
         },
+    ).json()["id"]
+    assert (
+        client.patch(f"/api/schedules/{sid}", json={"enabled": False}).status_code
+        == 200
     )
-    assert resp.status_code == 422
+    assert (
+        client.patch(f"/api/schedules/{sid}", json={"enabled": True}).status_code == 200
+    )
 
 
 def test_api_create_scene_action_shape(client):

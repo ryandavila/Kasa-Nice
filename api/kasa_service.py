@@ -54,6 +54,12 @@ def hsv_to_hex(hsv: Hsv) -> str:
     return f"#{int(r * 255):02x}{int(g * 255):02x}{int(b * 255):02x}"
 
 
+# Consecutive failed refreshes before a cached device reports unreachable. One
+# miss is usually transient (wifi hiccup, momentary timeout); requiring a streak
+# keeps a flaky-but-alive plug from flapping the UI and the unreachable alert.
+_UNREACHABLE_AFTER_MISSES = 3
+
+
 class DeviceNotFoundError(KeyError):
     """Raised when a device or child id is not in the registry."""
 
@@ -178,6 +184,11 @@ class DeviceRegistry:
         # Stable ids already migrated this process, so migration runs at most once
         # per device.
         self._migrated_ids: set[str] = set()
+        # Consecutive failed refreshes per stable id. A cached device is only
+        # rebuilt by discovery, so without this a device that dies mid-session
+        # would serve stale state as reachable forever (no grayed card, no
+        # unreachable alert). Any successful read clears the streak.
+        self._miss_counts: dict[str, int] = {}
 
     def _hosts(self) -> set[str]:
         """LAN hosts of the currently-cached local devices.
@@ -213,18 +224,40 @@ class DeviceRegistry:
 
         Callers skip caching an unreadable device (bad creds, offline) — else
         serializing it later would raise and take down the whole device list.
+        Every outcome feeds the per-device miss streak behind ``is_reachable``,
+        so any refresher (SSE loop, recorder, alerts, control actions) both
+        detects an outage and clears one on recovery.
         """
         try:
             await device.update()
-            return True
         except AuthenticationError as e:
             # Expected for devices that dropped local auth (e.g. HS300 strips);
             # handled via the cloud fallback, so not a hard error.
             logger.debug(f"Local auth failed for {device.host}: {e}")
-            return False
+            ok = False
         except Exception as e:  # noqa: BLE001 - one bad device shouldn't break the rest
             logger.error(f"Error updating device {device.host}: {e}")
-            return False
+            ok = False
+        else:
+            ok = True
+        device_id = stable_device_id(device)
+        if ok:
+            self._miss_counts.pop(device_id, None)
+        else:
+            self._miss_counts[device_id] = self._miss_counts.get(device_id, 0) + 1
+        return ok
+
+    def is_reachable(self, device: KasaDevice) -> bool:
+        """Whether a cached device is still answering its refreshes.
+
+        False once ``_UNREACHABLE_AFTER_MISSES`` consecutive reads have failed;
+        the serialized ``reachable`` flag and the unreachable/recovered alert
+        edges key off this.
+        """
+        return (
+            self._miss_counts.get(stable_device_id(device), 0)
+            < _UNREACHABLE_AFTER_MISSES
+        )
 
     @staticmethod
     async def _safe_disconnect(device: KasaDevice) -> None:
@@ -824,8 +857,13 @@ def _build_usage(
     )
 
 
-def serialize_device(device: KasaDevice) -> Device:
-    """Convert a python-kasa device into the API schema."""
+def serialize_device(device: KasaDevice, *, reachable: bool = True) -> Device:
+    """Convert a python-kasa device into the API schema.
+
+    ``reachable`` lets list/stream callers mark a cached device whose refreshes
+    keep failing (see ``DeviceRegistry.is_reachable``); the identity and last
+    cached state still serialize so the card grays out in place.
+    """
     sys_info: dict[str, Any] = getattr(device, "sys_info", {}) or {}
     is_color = bool(sys_info.get("is_color", 0))
     is_dimmable = bool(sys_info.get("is_dimmable", 0))
@@ -857,6 +895,7 @@ def serialize_device(device: KasaDevice) -> Device:
         brightness=brightness,
         hsv=hsv,
         children=children,
+        reachable=reachable,
         # python-kasa devices expose set_alias; the cloud façade doesn't, so its
         # absence means "can't be renamed here". A strip is uniformly local or
         # cloud, so this flag also gates its per-outlet rename in the UI.

@@ -53,6 +53,11 @@ async def lifespan(app: FastAPI):
     else:
         # Discovery takes many seconds; run it in the background so the API serves
         # immediately (the frontend watches registry.discovering via /api/status).
+        # Flag it BEFORE any sibling task can run: the alert evaluator skips its
+        # cycles while discovering, and must not sneak in a first cycle against
+        # the empty registry (it would seed everything unreachable, then fire a
+        # spurious "recovered" storm when the sweep finishes).
+        registry.discovering = True
         discovery = asyncio.create_task(registry.run_startup_discovery())
         # Sample metered devices and persist readings beyond device memory.
         recorder = asyncio.create_task(

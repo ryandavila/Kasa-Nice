@@ -254,16 +254,24 @@ def _normalize_days(days: list[int]) -> list[int]:
 def _validate_at(value: str | None) -> str | None:
     """Validate a one-shot ``at`` local datetime string ('YYYY-MM-DDTHH:MM').
 
-    Parsed with ``fromisoformat`` (which also accepts seconds) purely to reject
-    garbage; the stored string is left as given and compared to the minute cursor
-    by the scheduler. ``None`` passes through for the other rule kinds.
+    Parsed with ``fromisoformat`` (which also accepts seconds) to reject garbage;
+    the stored string is left as given and compared to the minute cursor by the
+    scheduler as a *naive local* wall-clock label. That comparison silently
+    discards any timezone offset and turns a bare date into midnight, so both
+    forms — which fromisoformat would accept — are rejected rather than
+    reinterpreted as an instant the client didn't intend. ``None`` passes
+    through for the other rule kinds.
     """
     if value is None:
         return value
     try:
-        datetime.datetime.fromisoformat(value)
+        parsed = datetime.datetime.fromisoformat(value)
     except ValueError as e:
         raise ValueError("at must be an ISO local datetime, 'YYYY-MM-DDTHH:MM'") from e
+    if parsed.tzinfo is not None:
+        raise ValueError("at must be a naive local datetime (no timezone offset)")
+    if "T" not in value and " " not in value:
+        raise ValueError("at must include a time, 'YYYY-MM-DDTHH:MM'")
     return value
 
 

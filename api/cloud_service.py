@@ -13,6 +13,7 @@ the existing registry, routes, and serializer unchanged.
 
 import asyncio
 import json
+import time
 import uuid
 from datetime import datetime, timedelta
 from types import SimpleNamespace
@@ -37,6 +38,15 @@ _DEFAULT_BASE_URL = "https://wap.tplinkcloud.com"
 
 # Cloud-level error codes that mean the token is stale and we should re-login.
 _TOKEN_ERROR_CODES = {-20651, -20571, -20675, -20104}
+
+# Seconds an ``energy_summary`` result is served from cache. Each summary is a
+# burst of ~3 RPCs per outlet against a rate-limited cloud API that also carries
+# device *control*, so rapid or concurrent callers (the whole-home summary
+# endpoint fans out per device, the recorder samples on its own interval, a user
+# refreshing the Energy tab) must share one read instead of stacking bursts that
+# can get control itself rate-limited. Matches the registry's default cloud poll
+# throttle.
+_ENERGY_SUMMARY_TTL = 30.0
 
 
 class CloudError(RuntimeError):
@@ -214,6 +224,11 @@ class CloudDevice:
         self.children: list[CloudChild] = []
         # Once-guard: warn about a drifted device clock at most once per device.
         self._clock_drift_warned: bool = False
+        # ``energy_summary`` cache: last result, its timestamp, and a
+        # single-flight lock so concurrent callers share one cloud read.
+        self._energy_summary_cache: dict[str, Any] | None = None
+        self._energy_summary_at: float = float("-inf")
+        self._energy_summary_lock = asyncio.Lock()
         # Empty sys_info => serialize_device reports not color/dimmable. Advertise
         # an Energy module since it meters per outlet (read via energy_summary()).
         self.sys_info: dict[str, Any] = {}
@@ -274,6 +289,25 @@ class CloudDevice:
 
     async def energy_summary(self) -> dict[str, Any]:
         """Aggregate every outlet's energy meter into one whole-strip summary.
+
+        Serves the last result for ``_ENERGY_SUMMARY_TTL`` seconds behind a
+        single-flight lock — see the constant's comment for why bursts here can
+        break device control. Callers treat the returned dict as read-only.
+        """
+        async with self._energy_summary_lock:
+            now = time.monotonic()
+            if (
+                self._energy_summary_cache is not None
+                and now - self._energy_summary_at < _ENERGY_SUMMARY_TTL
+            ):
+                return self._energy_summary_cache
+            data = await self._fetch_energy_summary()
+            self._energy_summary_cache = data
+            self._energy_summary_at = time.monotonic()
+            return data
+
+    async def _fetch_energy_summary(self) -> dict[str, Any]:
+        """The uncached read behind ``energy_summary``.
 
         Metering is per-outlet (a parent read returns only slot 0), so read
         realtime power, this month's days, and this year's months per outlet

@@ -321,6 +321,45 @@ def test_run_loop_emits_and_dispatches_then_cancels(tmp_path, monkeypatch):
     assert delivered[0][0] == "https://hook"
 
 
+def test_run_loop_holds_off_while_discovering(tmp_path, monkeypatch):
+    """No cycle runs mid-discovery, and evaluation starts once it finishes.
+
+    Regression: the first cycle used to race startup discovery, see the
+    still-empty registry, seed every known device as unreachable, and then fire
+    a spurious "recovered" alert (and webhook) per device on every restart.
+    """
+    center = AlertCenter()
+    evaluator = AlertEvaluator()
+    thresholds = AlertThresholdStore(tmp_path / "alerts.json")
+    thresholds.set_all({"10.0.0.4": 5.0})
+
+    db = tmp_path / "energy.db"
+    _seed_samples(db, [("10.0.0.4", 10**9, 12.5)])
+    monkeypatch.setattr(alerts.time, "time", lambda: 10**9)
+
+    reg = DeviceRegistry()
+    reg._devices = {"10.0.0.4": FakeDevice("10.0.0.4", alias="Meter", has_energy=True)}
+    reg.discovering = True
+
+    async def drive():
+        task = asyncio.create_task(
+            run_alert_evaluator(
+                reg, evaluator, center, thresholds, interval=0.005, db_path=db
+            )
+        )
+        await asyncio.sleep(0.05)
+        assert center.recent() == []  # held off: no baseline, no alerts yet
+        reg.discovering = False
+        await asyncio.sleep(0.05)
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+    asyncio.run(drive())
+    # Evaluation resumed after the sweep: exactly one (debounced) power alert.
+    assert [a.type for a in center.recent()] == ["power_exceeded"]
+
+
 def test_run_loop_survives_a_failing_cycle():
     center = AlertCenter()
 

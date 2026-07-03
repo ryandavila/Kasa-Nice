@@ -5,6 +5,7 @@ network), matching the rest of the suite's ``asyncio.run`` style.
 """
 
 import asyncio
+import contextlib
 
 import pytest
 from conftest import FakeDevice
@@ -25,6 +26,10 @@ class FakeRegistry:
     async def refresh_all(self) -> list[FakeDevice]:
         self.refresh_count += 1
         return self.all()
+
+    def is_reachable(self, device: FakeDevice) -> bool:
+        # This fake serves only live devices with no miss tracking.
+        return True
 
     def unreachable_devices(self) -> list:
         # The broadcaster appends these to every frame; this fake serves only live
@@ -128,3 +133,53 @@ def test_loop_emits_keepalive_when_refresh_fails(fake_registry, monkeypatch):
     frames = asyncio.run(scenario())
     assert frames  # got at least one
     assert all(f == events._KEEPALIVE for f in frames)
+
+
+def test_loop_survives_a_serialization_failure(fake_registry, monkeypatch):
+    """A device raising while being serialized must not kill the shared loop.
+
+    Regression: the frame build used to sit outside the loop's try/except, so
+    one bad ``serialize_device`` ended live updates for every client until a
+    server restart.
+    """
+    real = events.serialize_device
+    failures = iter([True])  # fail exactly the first frame, then recover
+
+    def flaky(device, **kwargs):
+        if next(failures, False):
+            raise RuntimeError("partially updated device")
+        return real(device, **kwargs)
+
+    monkeypatch.setattr(events, "serialize_device", flaky)
+
+    async def scenario():
+        b = events._Broadcaster()
+        q = b.subscribe()
+        await asyncio.sleep(0.08)  # several ticks: one bad frame, then good ones
+        assert not b._task.done()  # the loop is still alive
+        b.unsubscribe(q)
+        return _data_frames(q)
+
+    frames = asyncio.run(scenario())
+    assert any(f == events._KEEPALIVE for f in frames)  # the failed tick
+    assert any(f.startswith("data: ") for f in frames)  # recovered after it
+
+
+def test_subscribe_restarts_a_dead_loop(fake_registry):
+    """A crashed (done but non-None) task is replaced on the next subscribe."""
+
+    async def scenario():
+        b = events._Broadcaster()
+        q1 = b.subscribe()
+        dead = b._task
+        dead.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await dead
+        q2 = b.subscribe()
+        assert b._task is not dead and not b._task.done()
+        await asyncio.sleep(0.05)  # the new loop ticks and serves frames
+        b.unsubscribe(q1)
+        b.unsubscribe(q2)
+        return _data_frames(q2)
+
+    assert asyncio.run(scenario())

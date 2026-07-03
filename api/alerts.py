@@ -33,6 +33,7 @@ from typing import NamedTuple
 import httpx
 
 from .config import get_settings
+from .fsutil import atomic_write_text
 from .logging_config import get_logger
 from .schemas import Alert, AlertType
 
@@ -200,8 +201,9 @@ class AlertThresholdStore:
 
     def _write(self, thresholds: dict[str, float]) -> None:
         try:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            self.path.write_text(json.dumps({"thresholds": thresholds}, indent=2))
+            atomic_write_text(
+                self.path, json.dumps({"thresholds": thresholds}, indent=2)
+            )
         except OSError as e:
             logger.warning(f"Could not write alert store {self.path}: {e}")
 
@@ -311,9 +313,10 @@ def latest_power_readings(db_path: Path, *, now: int | None = None) -> dict[str,
 def collect_readings(registry, db_path: Path) -> list[DeviceReading]:
     """Assemble this cycle's per-device readings from the registry and samples DB.
 
-    Reachability is authoritative and live (``registry.all()`` are reachable,
-    ``unreachable_devices()`` are the known-but-offline ones); power is the latest
-    recorded sample, so this adds no device I/O of its own.
+    Reachability comes from the registry: ``unreachable_devices()`` are the
+    known-but-offline ones, and a cached device that keeps failing its refresh
+    reports ``is_reachable(...) == False`` (so a mid-session outage is seen, not
+    just a device missing at discovery). Power is the latest recorded sample.
     """
     from .kasa_service import stable_device_id
 
@@ -322,7 +325,11 @@ def collect_readings(registry, db_path: Path) -> list[DeviceReading]:
     for device in registry.all():
         device_id = stable_device_id(device)
         alias = getattr(device, "alias", None) or device.host
-        readings.append(DeviceReading(device_id, alias, True, powers.get(device_id)))
+        readings.append(
+            DeviceReading(
+                device_id, alias, registry.is_reachable(device), powers.get(device_id)
+            )
+        )
     for snapshot in registry.unreachable_devices():
         readings.append(
             DeviceReading(snapshot.id, snapshot.alias, False, powers.get(snapshot.id))
@@ -348,15 +355,25 @@ async def run_alert_evaluator(
     is logged and the loop continues, and cancellation propagates for clean
     shutdown. ``deliver`` is injectable so tests can assert webhook dispatch
     without a real HTTP client.
+
+    Cycles are skipped while the registry is mid-discovery (startup sweep or a
+    manual rediscover): evaluating a half-populated registry would seed every
+    known device as unreachable and then fire a spurious "recovered" alert (and
+    webhook) for each once discovery finishes. Each evaluated cycle starts with a
+    ``refresh_all()`` so reachability edges are seen even with no browser open
+    (the SSE loop, the only other refresher, runs only while a client is
+    subscribed); the refresh honours the registry's cloud poll throttle.
     """
     while True:
         try:
-            readings = collect_readings(registry, db_path)
-            for draft in evaluator.evaluate(readings, thresholds.get_all()):
-                alert = center.emit(draft)
-                logger.info(f"Alert: {alert.message}")
-                if webhook_url:
-                    await deliver(webhook_url, alert)
+            if not getattr(registry, "discovering", False):
+                await registry.refresh_all()
+                readings = collect_readings(registry, db_path)
+                for draft in evaluator.evaluate(readings, thresholds.get_all()):
+                    alert = center.emit(draft)
+                    logger.info(f"Alert: {alert.message}")
+                    if webhook_url:
+                        await deliver(webhook_url, alert)
         except asyncio.CancelledError:
             raise
         except Exception as e:  # noqa: BLE001 - the evaluator must never crash startup

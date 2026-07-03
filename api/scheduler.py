@@ -56,28 +56,37 @@ def _local_now() -> datetime.datetime:
     return datetime.datetime.now().astimezone()
 
 
-def _sun_fires_at(
+def _sun_event_date(
     kind: str, rule: dict, minute: datetime.datetime, location: Location
-) -> bool:
-    """Whether ``location``'s sunrise/sunset (+offset) lands in local ``minute``.
+) -> datetime.date | None:
+    """The solar date whose sunrise/sunset (+offset) lands in local ``minute``.
 
     Compared as UTC instants, so the server's timezone drops out: the offset is
     whole minutes, so firing means ``truncate(event) == minute - offset``.
     ``solar``'s event for date D falls within (D 00:00 UTC - 13h, +37h) at any
-    longitude, so only four UTC dates can hit the target minute. False when
-    location is unset or the sun doesn't cross the horizon that day (polar).
+    longitude, so only four UTC dates can hit the target minute. None when
+    location is unset, the sun doesn't cross the horizon that day (polar), or no
+    date's event matches.
+
+    The returned date is the one the event's *solar day* at the location spans
+    (sun events sit within hours of solar noon, never near solar midnight), so
+    its weekday is the location's civil weekday of the event — which is what the
+    rule's ``days`` mean. The server-local weekday of ``minute`` is NOT that day
+    on a server whose zone differs from the location's (the fd19353 scenario: a
+    UTC server sees a summer NYC sunset after UTC midnight, one weekday later).
     """
     if location is None:
-        return False
+        return None
     lat, lon = location
     fn = solar.sunrise if kind == "sunrise" else solar.sunset
     offset = datetime.timedelta(minutes=rule.get("offset_minutes", 0) or 0)
     target = (minute - offset).astimezone(datetime.UTC)
     for delta in range(-2, 2):
-        event = fn(target.date() + datetime.timedelta(days=delta), lat, lon)
+        day = target.date() + datetime.timedelta(days=delta)
+        event = fn(day, lat, lon)
         if event and event.replace(second=0, microsecond=0) == target:
-            return True
-    return False
+            return day
+    return None
 
 
 def _once_target_hhmm(rule: dict) -> str | None:
@@ -116,13 +125,19 @@ def rule_due_at(
     if kind == "once":
         return _once_target_hhmm(rule) == minute.strftime("%Y-%m-%dT%H:%M")
 
-    # The remaining kinds are weekday-gated wall-clock rules.
-    if minute.weekday() not in rule.get("days", []):
-        return False
     if kind == "fixed_time":
+        if minute.weekday() not in rule.get("days", []):
+            return False
         return rule.get("time") == minute.strftime("%H:%M")
-    # sunrise / sunset
-    return _sun_fires_at(kind, rule, minute, location)
+
+    # sunrise / sunset: gate the weekday on the matched event's own solar date,
+    # not on ``minute``'s server-local weekday — the event can fall on a
+    # different server-local calendar day than the location's (see
+    # ``_sun_event_date``), and ``days`` mean the location's day.
+    event_date = _sun_event_date(kind, rule, minute, location)
+    if event_date is None:
+        return False
+    return event_date.weekday() in rule.get("days", [])
 
 
 def due_rules(
@@ -150,7 +165,54 @@ def minutes_to_evaluate(
         return []  # same minute (or clock stepped back): already handled
     if gap > max_catchup:
         return [current]  # suspended too long — don't replay a backlog
-    return [last + datetime.timedelta(minutes=i) for i in range(1, gap + 1)]
+    # ``last + timedelta`` is the right *instant* but carries last's fixed UTC
+    # offset; re-localize each one so its wall-clock label is correct for that
+    # instant. Otherwise the minute after a DST jump keeps the old offset and
+    # renders as a nonexistent (or wrong-hour) local time — firing a 02:00 rule
+    # on spring-forward and skipping the real 03:00. Equality is unaffected
+    # (aware datetimes compare as instants), only the label changes.
+    return [
+        (last + datetime.timedelta(minutes=i)).astimezone() for i in range(1, gap + 1)
+    ]
+
+
+def _fired_at_this_label_recently(rule: dict, minute: datetime.datetime) -> bool:
+    """Whether ``rule`` already fired at this wall-clock label within two hours.
+
+    During the DST fall-back the repeated hour makes every wall-clock label
+    occur at two instants an hour apart, so a fixed_time rule matching by label
+    would fire twice. The rule's ``last_fired`` timestamp is enough to detect
+    the repeat: same HH:MM label, under two hours ago. A daily rule can't
+    legitimately fire at the same label twice within that window, and an edited
+    ``time`` changes the label, so nothing real is suppressed.
+    """
+    last = (rule.get("last_fired") or {}).get("ts")
+    if not last:
+        return False
+    delta = minute.timestamp() - last
+    if not (0 < delta <= 2 * 3600):
+        return False
+    fired_label = datetime.datetime.fromtimestamp(last).astimezone().strftime("%H:%M")
+    return fired_label == minute.strftime("%H:%M")
+
+
+def _missed_once_rules(rules: list[dict], minute: datetime.datetime) -> list[dict]:
+    """Enabled one-shots whose ``at`` is already strictly before ``minute``.
+
+    A one-shot missed while the process was down or suspended (beyond the
+    catch-up window) would otherwise stay enabled forever, matching no future
+    minute — invisible dead weight the UI shows as an armed rule. The labels'
+    fixed 'YYYY-MM-DDTHH:MM' shape makes string comparison chronological.
+    """
+    current = minute.strftime("%Y-%m-%dT%H:%M")
+    missed: list[dict] = []
+    for rule in rules:
+        if not rule.get("enabled", False) or rule.get("kind") != "once":
+            continue
+        target = _once_target_hhmm(rule)
+        if target is not None and target < current:
+            missed.append(rule)
+    return missed
 
 
 def _fanout_result(succeeded: list, failed: list) -> str:
@@ -247,22 +309,32 @@ async def run_tick(
     Records each outcome (stamped with the scheduled minute, so it's
     deterministic) and, if anything was due, nudges the broadcaster once. A
     one-shot (``once``) rule is disabled after firing but kept, with its
-    ``last_fired`` note, so the user sees that it ran rather than it vanishing.
+    ``last_fired`` note, so the user sees that it ran rather than it vanishing;
+    a one-shot whose minute was missed entirely (sleep/restart past the catch-up
+    window) is likewise disabled with a "missed" note instead of staying armed
+    forever for a minute that will never come again.
     """
     rules = store.list_rules()
     if location is None:
         _warn_once_no_location(rules)
-    due = due_rules(rules, minute, location=location)
-    if not due:
-        return
     ts = int(minute.timestamp())
-    for rule in due:
+    for rule in _missed_once_rules(rules, minute):
+        store.update_rule(
+            rule["id"],
+            {"enabled": False, "last_fired": {"ts": ts, "result": "missed"}},
+        )
+    fired_any = False
+    for rule in due_rules(rules, minute, location=location):
+        if _fired_at_this_label_recently(rule, minute):
+            continue  # DST fall-back repeat of an already-fired label
         result = await fire_rule(rule, registry=registry, groups=groups)
         fields: dict = {"last_fired": {"ts": ts, "result": result}}
         if rule.get("kind") == "once":
             fields["enabled"] = False
         store.update_rule(rule["id"], fields)
-    await broadcaster.publish_now()
+        fired_any = True
+    if fired_any:
+        await broadcaster.publish_now()
 
 
 def _seconds_until_next_minute(now: datetime.datetime) -> float:
@@ -304,7 +376,11 @@ async def run_scheduler(
                     broadcaster=broadcaster,
                     location=location,
                 )
-            last_minute = current
+            # Never move the cursor backward: after an NTP step-back the old
+            # cursor already covers the replayed minutes, so keeping it prevents
+            # re-firing them as the clock re-advances.
+            if last_minute is None or current > last_minute:
+                last_minute = current
         except asyncio.CancelledError:
             raise
         except Exception as e:  # noqa: BLE001 - the scheduler must never crash startup

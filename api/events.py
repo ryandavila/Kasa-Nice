@@ -38,7 +38,10 @@ def _frame(devices: list) -> str:
     Known-but-unreachable devices are appended (``reachable=False``) so the frame
     stays a flat JSON array the client already merges, just extended.
     """
-    items = [serialize_device(d).model_dump() for d in devices]
+    items = [
+        serialize_device(d, reachable=registry.is_reachable(d)).model_dump()
+        for d in devices
+    ]
     items += [d.model_dump() for d in registry.unreachable_devices()]
     payload = json.dumps(items)
     return f"data: {payload}\n\n"
@@ -61,10 +64,15 @@ class _Broadcaster:
         self._last_frame: str | None = None
 
     def subscribe(self) -> asyncio.Queue[str]:
-        """Register a connection, starting the shared loop if it's the first."""
+        """Register a connection, starting the shared loop if it's the first.
+
+        Also restarts a loop that died to an unexpected error (``done()`` but
+        never reset) — otherwise every current subscriber would block on its
+        queue forever and new ones would get only their initial frame.
+        """
         queue: asyncio.Queue[str] = asyncio.Queue()
         self._subscribers.add(queue)
-        if self._task is None:
+        if self._task is None or self._task.done():
             self._task = asyncio.create_task(self._run())
         return queue
 
@@ -98,23 +106,29 @@ class _Broadcaster:
         Called after a control action so other clients update without waiting a
         tick. The handler already refreshed the affected device, so this
         serializes ``registry.all()`` without another read. No-op when nobody is
-        subscribed.
+        subscribed. Never raises: the action already succeeded, so a broken
+        frame must not turn it into an error response.
         """
-        if self._subscribers:
+        if not self._subscribers:
+            return
+        try:
             self._publish(registry.all())
+        except Exception as e:  # noqa: BLE001 - the nudge is best-effort
+            logger.debug(f"Immediate event publish failed: {e}")
 
     async def _run(self) -> None:
         """Re-read hardware on the interval and fan the frame out to everyone."""
         while True:
             await asyncio.sleep(_STREAM_INTERVAL)
+            # Serialization is inside the guard too: one device raising while
+            # partially updated must not kill the shared loop for every client.
             try:
                 devices = await registry.refresh_all()
-            except Exception as e:  # noqa: BLE001 - a transient read error must not kill the loop
+                self._publish(devices)
+            except Exception as e:  # noqa: BLE001 - a transient failure must not kill the loop
                 logger.debug(f"Event stream refresh failed: {e}")
                 # Keep connections alive until the next successful refresh.
                 self._fanout(_KEEPALIVE)
-                continue
-            self._publish(devices)
 
 
 broadcaster = _Broadcaster()

@@ -15,6 +15,42 @@ from api.kasa_service import (
     serialize_device,
 )
 
+# ── Mid-session unreachable demotion ─────────────────────────────────────────
+
+
+def test_repeated_refresh_failures_flip_reachable():
+    """A cached device whose reads keep failing reports unreachable.
+
+    Regression: refresh results were discarded, so a device that died
+    mid-session served stale state as reachable until a rediscover or restart —
+    no grayed card, no unreachable alert. A single miss stays reachable
+    (transient), and one good read recovers immediately.
+    """
+    reg = DeviceRegistry()
+    device = FakeDevice("10.0.0.9", alias="Plug")
+    reg._devices = {"10.0.0.9": device}
+
+    async def drive():
+        await reg.refresh_all()
+        assert reg.is_reachable(device) is True
+
+        device._fail_update = True
+        await reg.refresh_all()  # one miss: still reachable
+        assert reg.is_reachable(device) is True
+        await reg.refresh_all()
+        await reg.refresh_all()  # third consecutive miss: demoted
+        assert reg.is_reachable(device) is False
+        serialized = serialize_device(device, reachable=reg.is_reachable(device))
+        assert serialized.reachable is False
+        assert serialized.alias == "Plug"  # identity/state still serialize
+
+        device._fail_update = False
+        await reg.refresh_all()  # one good read recovers immediately
+        assert reg.is_reachable(device) is True
+
+    asyncio.run(drive())
+
+
 # ── serialize_device ────────────────────────────────────────────────────────
 
 

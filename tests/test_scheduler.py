@@ -24,6 +24,12 @@ TUESDAY_1830 = MONDAY_1830 + datetime.timedelta(days=1)
 # any timezone rather than hard-coding a wall-clock time.
 NYC = (40.7128, -74.0060)
 
+# The solar date used by the sun-rule cases. A rule's ``days`` gate on the sun
+# event's own (location-civil) weekday, NOT the server-local weekday of the fire
+# minute — on a UTC server a summer NYC sunset lands after UTC midnight, one
+# server-local weekday later.
+SUN_DAY = datetime.date(2024, 6, 21)
+
 
 def _rule(**over) -> dict:
     base = {
@@ -78,32 +84,33 @@ def _sun_local(kind: str, day: datetime.date) -> datetime.datetime:
 
 @pytest.mark.parametrize("kind", ["sunrise", "sunset"])
 def test_sun_rule_due_at_computed_local_minute(kind):
-    fire = _sun_local(kind, datetime.date(2024, 6, 21))
-    rule = _rule(kind=kind, days=[fire.weekday()], time=None)
+    fire = _sun_local(kind, SUN_DAY)
+    rule = _rule(kind=kind, days=[SUN_DAY.weekday()], time=None)
     assert scheduler.rule_due_at(rule, fire, location=NYC) is True
     off = fire + datetime.timedelta(minutes=1)
     assert scheduler.rule_due_at(rule, off, location=NYC) is False
 
 
 def test_sun_rule_never_due_without_location():
-    fire = _sun_local("sunrise", datetime.date(2024, 6, 21))
-    rule = _rule(kind="sunrise", days=[fire.weekday()], time=None)
+    fire = _sun_local("sunrise", SUN_DAY)
+    rule = _rule(kind="sunrise", days=[SUN_DAY.weekday()], time=None)
     # No location -> the rule silently doesn't fire (the loop warns once).
     assert scheduler.rule_due_at(rule, fire, location=None) is False
 
 
 def test_sun_rule_offset_shifts_fire_minute():
-    base = _sun_local("sunset", datetime.date(2024, 6, 21))
+    base = _sun_local("sunset", SUN_DAY)
     fire = base - datetime.timedelta(minutes=30)
-    rule = _rule(kind="sunset", days=[fire.weekday()], time=None, offset_minutes=-30)
+    # The offset shifts the fire minute but the weekday stays the sun event's own.
+    rule = _rule(kind="sunset", days=[SUN_DAY.weekday()], time=None, offset_minutes=-30)
     assert scheduler.rule_due_at(rule, fire, location=NYC) is True
     # Without the offset it would be due at ``base``, so it must not be now.
     assert scheduler.rule_due_at(rule, base, location=NYC) is False
 
 
 def test_sun_rule_respects_weekday():
-    fire = _sun_local("sunrise", datetime.date(2024, 6, 21))
-    other_day = (fire.weekday() + 1) % 7
+    fire = _sun_local("sunrise", SUN_DAY)
+    other_day = (SUN_DAY.weekday() + 1) % 7
     rule = _rule(kind="sunrise", days=[other_day], time=None)
     assert scheduler.rule_due_at(rule, fire, location=NYC) is False
 
@@ -127,12 +134,16 @@ def _server_tz(name: str):
 def test_sun_rule_fires_on_utc_server():
     """Regression: a UTC server (CI, and the Docker default) still fires NYC sunset.
 
-    Summer NYC sunset is past midnight UTC — a different calendar date than the
-    event's — which the old date-string comparison silently never matched.
+    Summer NYC sunset is past midnight UTC — a different calendar date (and
+    weekday) than the event's. The old date-string comparison silently never
+    matched the time, and the old weekday gate checked the server-local (UTC)
+    weekday, so a rule for the event's own weekday never fired either.
     """
     with _server_tz("UTC"):
-        fire = _sun_local("sunset", datetime.date(2024, 6, 21))
-        rule = _rule(kind="sunset", days=[fire.weekday()], time=None)
+        fire = _sun_local("sunset", SUN_DAY)
+        # The event is past midnight UTC: the server-local weekday differs.
+        assert fire.weekday() != SUN_DAY.weekday()
+        rule = _rule(kind="sunset", days=[SUN_DAY.weekday()], time=None)
         assert scheduler.rule_due_at(rule, fire, location=NYC) is True
         assert (
             scheduler.rule_due_at(
@@ -140,10 +151,14 @@ def test_sun_rule_fires_on_utc_server():
             )
             is False
         )
+        # A rule gated on the server-local (UTC) weekday must NOT fire: days mean
+        # the location's day, not the server's.
+        wrong = _rule(kind="sunset", days=[fire.weekday()], time=None)
+        assert scheduler.rule_due_at(wrong, fire, location=NYC) is False
 
         early = fire - datetime.timedelta(minutes=30)
         rule = _rule(
-            kind="sunset", days=[early.weekday()], time=None, offset_minutes=-30
+            kind="sunset", days=[SUN_DAY.weekday()], time=None, offset_minutes=-30
         )
         assert scheduler.rule_due_at(rule, early, location=NYC) is True
 
@@ -204,6 +219,97 @@ def test_long_gap_collapses_to_current_minute():
     # A suspended process shouldn't replay an hour of stale on/off toggles.
     later = MONDAY_1830 + datetime.timedelta(hours=1)
     assert scheduler.minutes_to_evaluate(MONDAY_1830, later, max_catchup=2) == [later]
+
+
+# ── DST and clock-step edges ─────────────────────────────────────────────────
+
+
+def test_spring_forward_catchup_relabels_the_minute():
+    """Catch-up minutes are re-localized to the offset of their own instant.
+
+    Regression: ``last + timedelta`` carried last's pre-jump offset, so the
+    minute after the spring-forward jump rendered as a nonexistent 02:00 — a
+    02:00 rule fired and the real 03:00 was never evaluated.
+    """
+    with _server_tz("America/New_York"):
+        last = datetime.datetime(2026, 3, 8, 1, 59).astimezone()  # EST
+        current = (last + datetime.timedelta(minutes=1)).astimezone()  # 03:00 EDT
+        assert current.strftime("%H:%M") == "03:00"
+        got = scheduler.minutes_to_evaluate(last, current)
+        assert [m.strftime("%H:%M") for m in got] == ["03:00"]
+
+
+def test_fall_back_repeated_label_fires_once(registry, groups, tmp_path):
+    """The repeated fall-back hour must not fire a fixed_time rule twice.
+
+    Both instants of the repeated hour carry the same wall-clock label, so the
+    rule is *due* at both; the ``last_fired`` guard suppresses the second.
+    """
+    with _server_tz("America/New_York"):
+        # 01:30 EDT and 01:30 EST, one real hour apart, same local label.
+        first = datetime.datetime(2026, 11, 1, 5, 30, tzinfo=datetime.UTC).astimezone()
+        repeat = datetime.datetime(2026, 11, 1, 6, 30, tzinfo=datetime.UTC).astimezone()
+        assert first.strftime("%H:%M") == repeat.strftime("%H:%M") == "01:30"
+
+        store = ScheduleStore(tmp_path / "s.json")
+        created = store.create_rule(_rule(time="01:30", days=[first.weekday()]))
+        broadcaster = AsyncMock()
+
+        async def tick(minute):
+            await scheduler.run_tick(
+                store, minute, registry=registry, groups=groups, broadcaster=broadcaster
+            )
+
+        asyncio.run(tick(first))
+        assert registry.get("10.0.0.1").is_on is True
+        first_fired = store.get_rule(created["id"])["last_fired"]
+
+        registry.get("10.0.0.1").is_on = False  # changed since; a re-fire would show
+        asyncio.run(tick(repeat))
+        assert registry.get("10.0.0.1").is_on is False  # repeat hour: not re-fired
+        assert store.get_rule(created["id"])["last_fired"] == first_fired
+
+        # An ordinary daily fire (same label, a day later) is not suppressed.
+        next_day = repeat + datetime.timedelta(days=1)
+        rule = store.get_rule(created["id"])
+        assert scheduler._fired_at_this_label_recently(rule, next_day) is False
+
+
+def test_clock_step_back_does_not_refire(monkeypatch, tmp_path):
+    """After an NTP step-back, minutes already evaluated must not fire again."""
+    monkeypatch.setattr(scheduler, "_seconds_until_next_minute", lambda now: 0.001)
+    fire = AsyncMock(return_value="ok")
+    monkeypatch.setattr(scheduler, "fire_rule", fire)
+    store = ScheduleStore(tmp_path / "s.json")
+    store.create_rule(_rule())  # Monday 18:30
+
+    # ``now_fn`` is read twice per cycle (the tick and the sleep computation).
+    stepped_back = MONDAY_1830 - datetime.timedelta(minutes=5)
+    ticks = iter([MONDAY_1830, MONDAY_1830, stepped_back, stepped_back])
+    done = asyncio.Event()
+
+    def now_fn():
+        try:
+            return next(ticks)
+        except StopIteration:
+            # Clock has re-advanced to the already-fired minute; hold there.
+            done.set()
+            return MONDAY_1830
+
+    async def drive():
+        task = asyncio.create_task(
+            scheduler.run_scheduler(store, None, None, AsyncMock(), now_fn=now_fn)
+        )
+        await asyncio.wait_for(done.wait(), timeout=2)
+        await asyncio.sleep(0.02)  # several more cycles at the re-advanced minute
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+    asyncio.run(drive())
+    # Without the forward-only cursor, the step-back rewound it and the
+    # re-advance replayed 18:30, double-firing the rule.
+    fire.assert_awaited_once()
 
 
 # ── Firing ────────────────────────────────────────────────────────────────────
@@ -417,6 +523,34 @@ def test_tick_once_rule_auto_disables_but_is_kept(registry, groups, tmp_path):
     assert rule["enabled"] is False
     assert rule["last_fired"]["result"] == "ok"
     assert registry.get("10.0.0.1").is_on is True
+
+
+def test_tick_marks_missed_once_rule(registry, groups, tmp_path):
+    """A one-shot whose minute passed unseen is disabled as "missed", not fired.
+
+    Regression: it used to stay enabled forever, armed for a minute that will
+    never come again (its exact-label match can't hit a past minute).
+    """
+    store = ScheduleStore(tmp_path / "s.json")
+    created = store.create_rule(_once(at="2024-01-01T18:20"))  # 10 min before tick
+    broadcaster = AsyncMock()
+
+    async def go():
+        await scheduler.run_tick(
+            store,
+            MONDAY_1830,
+            registry=registry,
+            groups=groups,
+            broadcaster=broadcaster,
+        )
+
+    asyncio.run(go())
+
+    rule = store.get_rule(created["id"])
+    assert rule["enabled"] is False
+    assert rule["last_fired"]["result"] == "missed"
+    assert registry.get("10.0.0.1").is_on is False  # it did NOT fire late
+    broadcaster.publish_now.assert_not_awaited()
 
 
 def test_tick_warns_once_for_sun_rule_without_location(

@@ -26,30 +26,29 @@ class EnergyHistoryStore:
 
     def __init__(self, path: Path) -> None:
         self.path = path
-        self._ready = False
 
     def _connect(self) -> sqlite3.Connection:
-        """Open a connection, creating the schema on first use.
+        """Open a connection, ensuring the schema exists.
 
-        Lazy init keeps construction side-effect-free and survives the DB file
-        being deleted between calls. WAL mode tolerates the recorder writing
-        while a request reads.
+        The idempotent DDL runs on every call (cheap next to the per-call
+        connection itself) rather than behind a once-latch: connecting recreates
+        a deleted DB file but not its tables, so a latch would leave every
+        operation failing with "no such table" until restart. WAL mode tolerates
+        the recorder writing while a request reads.
         """
         self.path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(self.path)
-        if not self._ready:
-            conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute(
-                "CREATE TABLE IF NOT EXISTS samples ("
-                "device_id TEXT NOT NULL, ts INTEGER NOT NULL, "
-                "power_w REAL, today_kwh REAL, month_kwh REAL)"
-            )
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_samples_device_ts "
-                "ON samples (device_id, ts)"
-            )
-            conn.commit()
-            self._ready = True
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS samples ("
+            "device_id TEXT NOT NULL, ts INTEGER NOT NULL, "
+            "power_w REAL, today_kwh REAL, month_kwh REAL)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_samples_device_ts "
+            "ON samples (device_id, ts)"
+        )
+        conn.commit()
         return conn
 
     def record(

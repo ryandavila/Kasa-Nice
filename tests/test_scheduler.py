@@ -325,13 +325,13 @@ def registry(monkeypatch):
             "10.0.0.3", type_name="Strip", children=[FakeChild("O1")]
         ),
     }
-    # Device rules use this injected registry; room rules reuse routes'
-    # ``_set_power_many``, which binds the module-global ``registry`` — the same
-    # single object in production. Point both at the fake so the two firing paths
-    # agree under test, mirroring how test_routes swaps the registry in.
-    from api import routes
+    # Device rules use this injected registry; room rules reuse the group
+    # router's ``set_power_many``, which binds the module-global ``registry`` —
+    # the same single object in production. Point both at the fake so the two
+    # firing paths agree under test, mirroring how test_routes swaps in a registry.
+    from api.routers import groups as groups_routes
 
-    monkeypatch.setattr(routes, "registry", reg)
+    monkeypatch.setattr(groups_routes, "registry", reg)
     return reg
 
 

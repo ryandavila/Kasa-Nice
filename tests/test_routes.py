@@ -5,9 +5,30 @@ from conftest import FakeChild, FakeDevice
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from api import routes
 from api.group_store import GroupStore
 from api.kasa_service import DeviceRegistry
+from api.routers import devices as devices_routes
+from api.routers import energy as energy_routes
+from api.routers import groups as groups_routes
+
+# The former monolithic ``routes`` module split into per-domain routers; these
+# tests span devices, energy (usage/summary), and group power. The shared
+# ``registry`` and ``broadcaster`` are the same single objects in production, so
+# patch the registry into every router module (each binds its own module global)
+# and mount the routers this suite exercises. ``broadcaster`` is one shared
+# instance across the modules, so patching it via any module patches all.
+routes_registry_modules = (devices_routes, energy_routes, groups_routes)
+broadcaster = devices_routes.broadcaster
+
+
+def _routes_app(reg, monkeypatch) -> TestClient:
+    for mod in routes_registry_modules:
+        monkeypatch.setattr(mod, "registry", reg)
+    app = FastAPI()
+    app.include_router(devices_routes.router)
+    app.include_router(energy_routes.router)
+    app.include_router(groups_routes.router)
+    return TestClient(app)
 
 
 @pytest.fixture
@@ -26,11 +47,7 @@ def client(monkeypatch):
         ),
         "10.0.0.4": FakeDevice("10.0.0.4", alias="Meter", has_energy=True),
     }
-    monkeypatch.setattr(routes, "registry", reg)
-
-    app = FastAPI()
-    app.include_router(routes.router)
-    return TestClient(app)
+    return _routes_app(reg, monkeypatch)
 
 
 def test_health(client):
@@ -46,10 +63,7 @@ def test_config_defaults_have_no_energy_rate(client):
 
 def test_config_exposes_configured_energy_rate(monkeypatch):
     reg = DeviceRegistry(energy_rate=0.2, energy_currency="€")
-    monkeypatch.setattr(routes, "registry", reg)
-    app = FastAPI()
-    app.include_router(routes.router)
-    body = TestClient(app).get("/api/config").json()
+    body = _routes_app(reg, monkeypatch).get("/api/config").json()
     assert body["energy_rate"] == 0.2
     assert body["energy_currency"] == "€"
 
@@ -63,10 +77,7 @@ def test_status_reports_idle_and_device_count(client):
 def test_status_reflects_active_discovery(monkeypatch):
     reg = DeviceRegistry()
     reg.discovering = True
-    monkeypatch.setattr(routes, "registry", reg)
-    app = FastAPI()
-    app.include_router(routes.router)
-    body = TestClient(app).get("/api/status").json()
+    body = _routes_app(reg, monkeypatch).get("/api/status").json()
     assert body["discovering"] is True
     assert body["device_count"] == 0
 
@@ -77,10 +88,7 @@ def test_list_devices(client):
 
 
 def _client_with(reg, monkeypatch) -> TestClient:
-    monkeypatch.setattr(routes, "registry", reg)
-    app = FastAPI()
-    app.include_router(routes.router)
-    return TestClient(app)
+    return _routes_app(reg, monkeypatch)
 
 
 def test_devices_endpoint_includes_unreachable_devices(tmp_path, monkeypatch):
@@ -127,11 +135,8 @@ def test_discover_broadcast_also_refreshes_cloud_devices(monkeypatch):
     }
     reg.discover_all = AsyncMock(return_value=list(reg._devices.values()))
     reg.attach_cloud = AsyncMock(return_value=list(reg._cloud_devices.values()))
-    monkeypatch.setattr(routes, "registry", reg)
-    app = FastAPI()
-    app.include_router(routes.router)
 
-    body = TestClient(app).post("/api/discover", json={}).json()
+    body = _routes_app(reg, monkeypatch).post("/api/discover", json={}).json()
 
     reg.discover_all.assert_awaited_once()
     reg.attach_cloud.assert_awaited_once()
@@ -147,11 +152,12 @@ def test_discover_target_does_not_attach_cloud(monkeypatch):
     )
     reg.discover_all = AsyncMock()
     reg.attach_cloud = AsyncMock()
-    monkeypatch.setattr(routes, "registry", reg)
-    app = FastAPI()
-    app.include_router(routes.router)
 
-    body = TestClient(app).post("/api/discover", json={"target": "10.0.0.5"}).json()
+    body = (
+        _routes_app(reg, monkeypatch)
+        .post("/api/discover", json={"target": "10.0.0.5"})
+        .json()
+    )
 
     reg.discover_target.assert_awaited_once_with("10.0.0.5")
     reg.discover_all.assert_not_awaited()
@@ -169,7 +175,7 @@ def test_control_action_nudges_broadcaster(client, monkeypatch):
     # A successful control action should push a fresh frame to other clients
     # immediately instead of leaving them to wait for the next refresh tick.
     nudge = AsyncMock()
-    monkeypatch.setattr(routes.broadcaster, "publish_now", nudge)
+    monkeypatch.setattr(broadcaster, "publish_now", nudge)
     assert (
         client.post("/api/devices/10.0.0.1/power", json={"on": True}).status_code == 200
     )
@@ -179,7 +185,7 @@ def test_control_action_nudges_broadcaster(client, monkeypatch):
 def test_failed_control_action_does_not_nudge(client, monkeypatch):
     # An unknown device 404s before any state changes, so there's nothing to push.
     nudge = AsyncMock()
-    monkeypatch.setattr(routes.broadcaster, "publish_now", nudge)
+    monkeypatch.setattr(broadcaster, "publish_now", nudge)
     assert (
         client.post("/api/devices/9.9.9.9/power", json={"on": True}).status_code == 404
     )
@@ -250,7 +256,7 @@ def test_rename_device_trims_whitespace(client):
 
 def test_rename_device_nudges_broadcaster(client, monkeypatch):
     nudge = AsyncMock()
-    monkeypatch.setattr(routes.broadcaster, "publish_now", nudge)
+    monkeypatch.setattr(broadcaster, "publish_now", nudge)
     assert (
         client.patch("/api/devices/10.0.0.1", json={"alias": "New"}).status_code == 200
     )
@@ -300,10 +306,7 @@ def test_cloud_device_reports_cannot_rename_and_rejects_patch(monkeypatch):
             "10.0.0.9", alias="Strip", type_name="Strip", renamable=False
         )
     }
-    monkeypatch.setattr(routes, "registry", reg)
-    app = FastAPI()
-    app.include_router(routes.router)
-    c = TestClient(app)
+    c = _routes_app(reg, monkeypatch)
 
     body = c.get("/api/devices").json()
     assert body[0]["can_rename"] is False
@@ -323,10 +326,7 @@ def test_rename_cloud_child_rejected_501(monkeypatch):
             children=[FakeChild("Outlet 1", renamable=False)],
         )
     }
-    monkeypatch.setattr(routes, "registry", reg)
-    app = FastAPI()
-    app.include_router(routes.router)
-    r = TestClient(app).patch(
+    r = _routes_app(reg, monkeypatch).patch(
         "/api/devices/CLOUDMAC/children/Outlet 1", json={"alias": "Lamp"}
     )
     assert r.status_code == 501
@@ -348,10 +348,7 @@ def test_usage_without_emeter_404(client):
 
 
 def _summary_app(reg, monkeypatch):
-    monkeypatch.setattr(routes, "registry", reg)
-    app = FastAPI()
-    app.include_router(routes.router)
-    return TestClient(app)
+    return _routes_app(reg, monkeypatch)
 
 
 def test_energy_summary_sums_metered_devices(monkeypatch):
@@ -431,7 +428,7 @@ async def _boom() -> None:
 def groups_store(monkeypatch, tmp_path):
     """A fresh, isolated group store wired into the routes for room-power tests."""
     store = GroupStore(tmp_path / "groups.json")
-    monkeypatch.setattr(routes, "groups", store)
+    monkeypatch.setattr(groups_routes, "groups", store)
     return store
 
 
@@ -445,21 +442,21 @@ def test_group_power_all_succeed(client, groups_store):
     r = client.post(f"/api/groups/{gid}/power", json={"on": True})
     assert r.status_code == 200
     assert r.json() == {"on": True, "succeeded": ["10.0.0.1", "10.0.0.2"], "failed": []}
-    assert routes.registry.get("10.0.0.1").is_on is True
-    assert routes.registry.get("10.0.0.2").is_on is True
+    assert devices_routes.registry.get("10.0.0.1").is_on is True
+    assert devices_routes.registry.get("10.0.0.2").is_on is True
 
 
 def test_group_power_partial_failure_stays_200(client, groups_store, monkeypatch):
     # One device errors when toggled; the others still switch and it's reported
     # under failed, not as a 500.
-    monkeypatch.setattr(routes.registry.get("10.0.0.2"), "turn_on", _boom)
+    monkeypatch.setattr(devices_routes.registry.get("10.0.0.2"), "turn_on", _boom)
     gid = _make_group(groups_store, ["10.0.0.1", "10.0.0.2"])
     r = client.post(f"/api/groups/{gid}/power", json={"on": True})
     assert r.status_code == 200
     body = r.json()
     assert body["succeeded"] == ["10.0.0.1"]
     assert body["failed"] == ["10.0.0.2"]
-    assert routes.registry.get("10.0.0.1").is_on is True
+    assert devices_routes.registry.get("10.0.0.1").is_on is True
 
 
 def test_group_power_missing_device_counts_as_failed(client, groups_store):
@@ -478,7 +475,7 @@ def test_group_power_unknown_group_404(client, groups_store):
 
 def test_group_power_nudges_broadcaster(client, groups_store, monkeypatch):
     nudge = AsyncMock()
-    monkeypatch.setattr(routes.broadcaster, "publish_now", nudge)
+    monkeypatch.setattr(broadcaster, "publish_now", nudge)
     gid = _make_group(groups_store, ["10.0.0.1"])
     assert client.post(f"/api/groups/{gid}/power", json={"on": True}).status_code == 200
     nudge.assert_awaited_once()
@@ -489,7 +486,7 @@ def test_group_power_nudges_broadcaster_on_partial_failure(
 ):
     # Some devices changed, so other clients must be told even when one failed.
     nudge = AsyncMock()
-    monkeypatch.setattr(routes.broadcaster, "publish_now", nudge)
+    monkeypatch.setattr(broadcaster, "publish_now", nudge)
     gid = _make_group(groups_store, ["10.0.0.1", "9.9.9.9"])
     assert client.post(f"/api/groups/{gid}/power", json={"on": True}).status_code == 200
     nudge.assert_awaited_once()
@@ -502,11 +499,11 @@ def test_all_power_switches_every_device(client):
     assert body["on"] is True
     assert set(body["succeeded"]) == {"10.0.0.1", "10.0.0.2", "10.0.0.3", "10.0.0.4"}
     assert body["failed"] == []
-    assert all(d.is_on for d in routes.registry.all())
+    assert all(d.is_on for d in devices_routes.registry.all())
 
 
 def test_all_power_partial_failure_stays_200(client, monkeypatch):
-    monkeypatch.setattr(routes.registry.get("10.0.0.3"), "turn_off", _boom)
+    monkeypatch.setattr(devices_routes.registry.get("10.0.0.3"), "turn_off", _boom)
     r = client.post("/api/power", json={"on": False})
     assert r.status_code == 200
     body = r.json()
@@ -516,6 +513,6 @@ def test_all_power_partial_failure_stays_200(client, monkeypatch):
 
 def test_all_power_nudges_broadcaster(client, monkeypatch):
     nudge = AsyncMock()
-    monkeypatch.setattr(routes.broadcaster, "publish_now", nudge)
+    monkeypatch.setattr(broadcaster, "publish_now", nudge)
     assert client.post("/api/power", json={"on": False}).status_code == 200
     nudge.assert_awaited_once()

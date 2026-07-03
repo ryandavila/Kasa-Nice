@@ -9,7 +9,7 @@ from conftest import FakeDevice
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from api import alerts, routes
+from api import alerts
 from api.alerts import (
     AlertCenter,
     AlertDraft,
@@ -22,6 +22,7 @@ from api.alerts import (
 )
 from api.energy_history import EnergyHistoryStore
 from api.kasa_service import DeviceRegistry
+from api.routers import alerts as alerts_routes
 
 
 def _reading(device_id="d1", *, alias="Plug", reachable=True, power_w=None):
@@ -410,10 +411,10 @@ def client(monkeypatch, tmp_path):
     # Fresh, isolated ring buffer + threshold store wired into the routes.
     center = AlertCenter()
     store = AlertThresholdStore(tmp_path / "alerts.json")
-    monkeypatch.setattr(routes, "alert_center", center)
-    monkeypatch.setattr(routes, "alert_thresholds", store)
+    monkeypatch.setattr(alerts_routes, "alert_center", center)
+    monkeypatch.setattr(alerts_routes, "alert_thresholds", store)
     app = FastAPI()
-    app.include_router(routes.router)
+    app.include_router(alerts_routes.router)
     return TestClient(app), center, store
 
 

@@ -2,8 +2,8 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from api import routes
 from api.group_store import GroupStore
+from api.routers import groups as groups_routes
 
 
 @pytest.fixture
@@ -104,9 +104,9 @@ def test_migrate_device_id_dedupes_when_both_ids_present(store):
 
 @pytest.fixture
 def client(monkeypatch, store):
-    monkeypatch.setattr(routes, "groups", store)
+    monkeypatch.setattr(groups_routes, "groups", store)
     app = FastAPI()
-    app.include_router(routes.router)
+    app.include_router(groups_routes.router)
     return TestClient(app)
 
 

@@ -10,9 +10,9 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from kasa import Module
 
-from api import routes
 from api.energy_history import EnergyHistoryStore, run_recorder
 from api.kasa_service import DeviceRegistry, EnergySnapshot, EnergyUnsupportedError
+from api.routers import energy as energy_routes
 
 
 @pytest.fixture
@@ -248,10 +248,10 @@ def client(monkeypatch, store):
     store.record("10.0.0.4", 9.0, 0.4, ts=now - 60)
     reg = DeviceRegistry(energy_rate=0.2)
     reg._devices = {"10.0.0.4": FakeDevice("10.0.0.4", has_energy=True)}
-    monkeypatch.setattr(routes, "history", store)
-    monkeypatch.setattr(routes, "registry", reg)
+    monkeypatch.setattr(energy_routes, "history", store)
+    monkeypatch.setattr(energy_routes, "registry", reg)
     app = FastAPI()
-    app.include_router(routes.router)
+    app.include_router(energy_routes.router)
     return TestClient(app)
 
 

@@ -14,10 +14,10 @@ from conftest import FakeDevice
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from api import routes
 from api.energy_history import EnergyHistoryStore
 from api.group_store import GroupStore
 from api.kasa_service import DeviceRegistry
+from api.routers import energy as energy_routes
 
 
 def _local_noon(d: datetime.date) -> int:
@@ -39,11 +39,11 @@ def group_store(tmp_path):
 
 
 def _client(reg, store, group_store, monkeypatch) -> TestClient:
-    monkeypatch.setattr(routes, "registry", reg)
-    monkeypatch.setattr(routes, "history", store)
-    monkeypatch.setattr(routes, "groups", group_store)
+    monkeypatch.setattr(energy_routes, "registry", reg)
+    monkeypatch.setattr(energy_routes, "history", store)
+    monkeypatch.setattr(energy_routes, "groups", group_store)
     app = FastAPI()
-    app.include_router(routes.router)
+    app.include_router(energy_routes.router)
     return TestClient(app)
 
 

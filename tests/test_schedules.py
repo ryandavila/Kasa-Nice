@@ -5,7 +5,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from api import routes
+from api.routers import schedules as schedules_routes
 from api.schedule_store import ScheduleStore
 from api.schemas import Schedule
 
@@ -19,7 +19,9 @@ class _FakeSettings:
 
 def _set_location(monkeypatch, location: tuple[float, float] | None) -> None:
     """Force the server's configured location for a test (independent of .env)."""
-    monkeypatch.setattr(routes, "get_settings", lambda: _FakeSettings(location))
+    monkeypatch.setattr(
+        schedules_routes, "get_settings", lambda: _FakeSettings(location)
+    )
 
 
 @pytest.fixture
@@ -113,9 +115,9 @@ def test_rules_persist_across_instances(tmp_path):
 
 @pytest.fixture
 def client(monkeypatch, store):
-    monkeypatch.setattr(routes, "schedules", store)
+    monkeypatch.setattr(schedules_routes, "schedules", store)
     app = FastAPI()
-    app.include_router(routes.router)
+    app.include_router(schedules_routes.router)
     return TestClient(app)
 
 

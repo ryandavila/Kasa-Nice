@@ -6,8 +6,9 @@ from conftest import FakeDevice
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from api import routes, scene_service
+from api import scene_service
 from api.kasa_service import DeviceRegistry
+from api.routers import scenes as scenes_routes
 from api.scene_store import SceneStore
 
 
@@ -92,12 +93,12 @@ def registry():
 def client(monkeypatch, store, registry):
     # Wire the same store/registry into both the route module (list/create/
     # snapshot/patch/delete) and the service module (apply), so they agree.
-    monkeypatch.setattr(routes, "registry", registry)
-    monkeypatch.setattr(routes, "scenes", store)
+    monkeypatch.setattr(scenes_routes, "registry", registry)
+    monkeypatch.setattr(scenes_routes, "scenes", store)
     monkeypatch.setattr(scene_service, "registry", registry)
     monkeypatch.setattr(scene_service, "scenes", store)
     app = FastAPI()
-    app.include_router(routes.router)
+    app.include_router(scenes_routes.router)
     return TestClient(app)
 
 

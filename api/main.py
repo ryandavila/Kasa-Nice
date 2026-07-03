@@ -21,7 +21,14 @@ from .events import router as events_router
 from .group_store import groups
 from .kasa_service import registry
 from .logging_config import get_logger, setup_logging
-from .routes import router
+from .routers import (
+    alerts_router,
+    devices_router,
+    energy_router,
+    groups_router,
+    scenes_router,
+    schedules_router,
+)
 from .schedule_store import schedules
 from .scheduler import run_scheduler
 
@@ -121,7 +128,12 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    app.include_router(router)
+    app.include_router(devices_router)
+    app.include_router(energy_router)
+    app.include_router(groups_router)
+    app.include_router(scenes_router)
+    app.include_router(schedules_router)
+    app.include_router(alerts_router)
     app.include_router(events_router)
 
     if WEB_BUILD_DIR.is_dir():

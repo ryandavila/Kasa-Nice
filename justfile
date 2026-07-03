@@ -93,16 +93,30 @@ e2e: web-build
     # Kasa-Nice instance a developer may have running on the usual 8080.
     port=8199
     base="http://127.0.0.1:${port}"
+    # Point every persistence store at a throwaway directory: the fake-device
+    # server WRITES these files (snapshot store, energy recorder, specs creating
+    # scenes/schedules/alerts), and the defaults live in data/ — the real runtime
+    # state that the Docker instance mounts.
+    tmpdata="$(mktemp -d)"
     # The alerts spec needs a real energy-sample + alert-evaluator cycle against
     # the fake registry; both intervals are floored at 10s (see api/config.py),
     # so set them there to keep that spec's wait fast rather than the ~30-60s
     # production defaults.
     KASA_FAKE_DEVICES=1 KASA_HOST=127.0.0.1 KASA_PORT="$port" \
         KASA_ENERGY_SAMPLE_INTERVAL=10 KASA_ALERT_INTERVAL=10 \
+        KASA_STATE_FILE="$tmpdata/known_devices.json" \
+        KASA_SNAPSHOT_FILE="$tmpdata/device_snapshots.json" \
+        KASA_GROUPS_FILE="$tmpdata/groups.json" \
+        KASA_ENERGY_HISTORY_FILE="$tmpdata/energy_history.db" \
+        KASA_SCHEDULES_FILE="$tmpdata/schedules.json" \
+        KASA_ALERTS_FILE="$tmpdata/alerts.json" \
+        KASA_SCENES_FILE="$tmpdata/scenes.json" \
+        KASA_VACATION_FILE="$tmpdata/vacation.json" \
         uv run python -m api.main &
     server_pid=$!
-    # Kill the server on any exit (success, failure, or interrupt) so it never leaks.
-    trap 'kill "$server_pid" 2>/dev/null || true; wait "$server_pid" 2>/dev/null || true' EXIT
+    # Kill the server and drop its scratch state on any exit (success, failure,
+    # or interrupt) so neither ever leaks.
+    trap 'kill "$server_pid" 2>/dev/null || true; wait "$server_pid" 2>/dev/null || true; rm -rf "$tmpdata"' EXIT
     # Wait for OUR server to accept connections; fail loudly if it never binds
     # (e.g. the port was taken) rather than testing against something else.
     for _ in $(seq 1 60); do
@@ -126,9 +140,21 @@ screenshots: web-build
     (cd web && bunx playwright install chromium)
     port=8198
     base="http://127.0.0.1:${port}"
-    KASA_FAKE_DEVICES=1 KASA_HOST=127.0.0.1 KASA_PORT="$port" uv run python -m api.main &
+    # Same throwaway persistence directory as `just e2e`: the fake server writes
+    # these files, and the defaults are the real runtime state in data/.
+    tmpdata="$(mktemp -d)"
+    KASA_FAKE_DEVICES=1 KASA_HOST=127.0.0.1 KASA_PORT="$port" \
+        KASA_STATE_FILE="$tmpdata/known_devices.json" \
+        KASA_SNAPSHOT_FILE="$tmpdata/device_snapshots.json" \
+        KASA_GROUPS_FILE="$tmpdata/groups.json" \
+        KASA_ENERGY_HISTORY_FILE="$tmpdata/energy_history.db" \
+        KASA_SCHEDULES_FILE="$tmpdata/schedules.json" \
+        KASA_ALERTS_FILE="$tmpdata/alerts.json" \
+        KASA_SCENES_FILE="$tmpdata/scenes.json" \
+        KASA_VACATION_FILE="$tmpdata/vacation.json" \
+        uv run python -m api.main &
     server_pid=$!
-    trap 'kill "$server_pid" 2>/dev/null || true; wait "$server_pid" 2>/dev/null || true' EXIT
+    trap 'kill "$server_pid" 2>/dev/null || true; wait "$server_pid" 2>/dev/null || true; rm -rf "$tmpdata"' EXIT
     for _ in $(seq 1 60); do
         if curl -sf "${base}/api/status" >/dev/null 2>&1; then ready=1; break; fi
         if ! kill -0 "$server_pid" 2>/dev/null; then echo "screenshots server exited early"; exit 1; fi

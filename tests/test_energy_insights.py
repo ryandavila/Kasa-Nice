@@ -136,7 +136,7 @@ def test_insights_week_over_week(store, group_store, monkeypatch):
 
 def test_insights_flags_idle_hog_with_live_alias(store, group_store, monkeypatch):
     day = datetime.date.today() - datetime.timedelta(days=1)
-    for hour, watts in ((2, 4.0), (3, 6.0), (4, 8.0)):  # median 6 > 2W threshold
+    for hour, watts in ((2, 16.0), (3, 20.0), (4, 24.0)):  # median 20 > 15W threshold
         store.record("10.0.0.4", watts, None, ts=_local_hour(day, hour))
     reg = DeviceRegistry()
     reg._devices = {"10.0.0.4": FakeDevice("10.0.0.4", alias="Fridge", has_energy=True)}
@@ -148,7 +148,7 @@ def test_insights_flags_idle_hog_with_live_alias(store, group_store, monkeypatch
     hog = body["idle"][0]
     assert hog["device_id"] == "10.0.0.4"
     assert hog["alias"] == "Fridge"  # labelled from the live registry
-    assert hog["idle_w"] == pytest.approx(6.0)
+    assert hog["idle_w"] == pytest.approx(20.0)
     assert hog["is_idle_hog"] is True
 
 

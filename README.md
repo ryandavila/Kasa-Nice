@@ -178,6 +178,18 @@ all cost fields are null and the UI shows kWh only.
 > not model tiered pricing, time-of-use rates, fixed service charges, or taxes, so
 > treat the figures as a rough estimate, not a bill.
 
+### Idle draw & the "Vampire" tag
+
+The Energy tab's insights panel lists each device's **overnight idle draw**: the
+median power between 1–5am over the last 14 days (median, so a fridge compressor
+cycling on doesn't skew it). Devices whose median exceeds **15W** get a red
+**Vampire** tag — at that draw a device burns roughly 11 kWh a month sitting
+idle, the point where standby waste starts to cost real money. The threshold is
+deliberately above typical always-on infrastructure (routers, aquarium pumps and
+filters run 3–12W), so a tag usually means something worth investigating. It
+can't tell *intentional* heavy loads (a server, a dehumidifier) from wasteful
+ones, though — treat it as a prompt to check, not a verdict.
+
 ### Schedules
 
 The **Schedules** tab lets you create rules that fire on one of four **triggers**:

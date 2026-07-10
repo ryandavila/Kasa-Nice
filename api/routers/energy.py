@@ -103,8 +103,10 @@ async def device_history(
 # ── Energy insights ─────────────────────────────────────────────────────────
 
 # Median overnight draw above this (watts) marks a device as a "vampire" load
-# worth flagging — roughly the standby of a small always-on appliance.
-_IDLE_HOG_THRESHOLD_W = 2.0
+# worth flagging. 15W constant is roughly $1-2/month — the point where idle draw
+# becomes real money — and stays above intentional always-on gear like routers
+# and aquarium pumps, which a lower bar tags indiscriminately.
+_IDLE_HOG_THRESHOLD_W = 15.0
 # Window for the idle-draw median: long enough to smooth nightly variation, short
 # enough to reflect the current setup rather than months-old behaviour.
 _IDLE_WINDOW_DAYS = 14

@@ -25,7 +25,7 @@ dependencies = [
     "python-kasa==0.10.2",
     "fastapi>=0.139",
     "uvicorn[standard]>=0.49",
-    "tzdata==2026.2",
+    "tzdata==2026.3",
     "pydantic-settings>=2.14.2",
     # Used to POST alert webhooks. Also pulled in by FastAPI's TestClient, but
     # a runtime feature depends on it now, so it's a first-class dependency.

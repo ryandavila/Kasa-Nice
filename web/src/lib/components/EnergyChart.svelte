@@ -28,7 +28,7 @@
 				></div>
 				<!-- value tooltip on hover -->
 				<div
-					class="pointer-events-none absolute -top-7 left-1/2 z-10 -translate-x-1/2 whitespace-nowrap rounded-md border border-line bg-surface px-2 py-1 font-mono text-[10px] text-ink opacity-0 shadow-sm transition-opacity group-hover:opacity-100"
+					class="pointer-events-none absolute -top-7 left-1/2 z-10 -translate-x-1/2 rounded-md border border-line bg-surface px-2 py-1 font-mono text-[10px] whitespace-nowrap text-ink opacity-0 shadow-sm transition-opacity group-hover:opacity-100"
 				>
 					{tip(d)}
 				</div>

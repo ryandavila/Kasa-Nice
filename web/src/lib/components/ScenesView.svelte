@@ -87,7 +87,7 @@
 			onsubmit={(e) => (e.preventDefault(), save())}
 		>
 			<label class="flex flex-col gap-1.5">
-				<span class="text-xs font-medium uppercase tracking-wide text-faint">Scene name</span>
+				<span class="text-xs font-medium tracking-wide text-faint uppercase">Scene name</span>
 				<!-- svelte-ignore a11y_autofocus -->
 				<input
 					bind:value={name}
@@ -98,7 +98,7 @@
 			</label>
 
 			<div class="flex flex-col gap-1.5">
-				<span class="text-xs font-medium uppercase tracking-wide text-faint">
+				<span class="text-xs font-medium tracking-wide text-faint uppercase">
 					Capture these devices' current state
 				</span>
 				{#if selectable.length}

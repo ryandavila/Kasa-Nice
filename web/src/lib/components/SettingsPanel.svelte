@@ -112,7 +112,7 @@
 									{#each pendingSummary as row (row.label)}
 										<li class="flex items-center justify-between">
 											<span>{row.label}</span>
-											<span class="font-mono tabular-nums text-ink">{row.count}</span>
+											<span class="font-mono text-ink tabular-nums">{row.count}</span>
 										</li>
 									{/each}
 								</ul>

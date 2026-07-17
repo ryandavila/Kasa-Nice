@@ -20,7 +20,7 @@
 </script>
 
 <label
-	class="group relative flex cursor-pointer items-center gap-2 rounded-full border border-line bg-raised py-1.5 pl-1.5 pr-3 text-xs font-medium text-muted transition-colors hover:border-accent has-[:disabled]:cursor-default has-[:disabled]:opacity-40"
+	class="group relative flex cursor-pointer items-center gap-2 rounded-full border border-line bg-raised py-1.5 pr-3 pl-1.5 text-xs font-medium text-muted transition-colors hover:border-accent has-[:disabled]:cursor-default has-[:disabled]:opacity-40"
 >
 	<span
 		class="grid h-6 w-6 place-items-center rounded-full ring-1 ring-black/5"

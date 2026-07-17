@@ -55,13 +55,13 @@
 
 		<!-- Month-end projection -->
 		<div class="mt-5">
-			<h4 class="mb-3 font-display text-xs font-semibold uppercase tracking-[0.18em] text-muted">
+			<h4 class="mb-3 font-display text-xs font-semibold tracking-[0.18em] text-muted uppercase">
 				Month-end projection
 			</h4>
 			<dl class="grid grid-cols-1 gap-3 sm:grid-cols-2">
 				{#each [{ k: 'So far this month', v: insights.projection.month_to_date_kwh, cost: insights.projection.month_to_date_cost }, { k: 'Projected total', v: insights.projection.projected_kwh, cost: insights.projection.projected_cost }] as s (s.k)}
 					<div class="rounded-xl border border-line bg-raised/50 px-3 py-2.5">
-						<dt class="text-[11px] uppercase tracking-wide text-faint">{s.k}</dt>
+						<dt class="text-[11px] tracking-wide text-faint uppercase">{s.k}</dt>
 						<dd class="mt-0.5 font-display text-xl font-semibold text-ink">
 							{fmt(s.v)}<span class="ml-1 text-xs font-normal text-muted">kWh</span>
 						</dd>
@@ -80,7 +80,7 @@
 
 		<!-- Week over week -->
 		<div class="mt-6 border-t border-line pt-6">
-			<h4 class="mb-3 font-display text-xs font-semibold uppercase tracking-[0.18em] text-muted">
+			<h4 class="mb-3 font-display text-xs font-semibold tracking-[0.18em] text-muted uppercase">
 				This week vs last
 			</h4>
 			<div class="flex flex-wrap items-baseline gap-x-6 gap-y-1">
@@ -114,7 +114,7 @@
 		<!-- Per-room rollups -->
 		{#if insights.rooms.length}
 			<div class="mt-6 border-t border-line pt-6">
-				<h4 class="mb-3 font-display text-xs font-semibold uppercase tracking-[0.18em] text-muted">
+				<h4 class="mb-3 font-display text-xs font-semibold tracking-[0.18em] text-muted uppercase">
 					By room
 				</h4>
 				<div class="space-y-2">
@@ -154,7 +154,7 @@
 		{#if insights.idle.length}
 			<div class="mt-6 border-t border-line pt-6">
 				<div class="mb-3 flex items-center justify-between gap-2">
-					<h4 class="font-display text-xs font-semibold uppercase tracking-[0.18em] text-muted">
+					<h4 class="font-display text-xs font-semibold tracking-[0.18em] text-muted uppercase">
 						Overnight idle draw
 					</h4>
 					{#if hogs.length}

@@ -262,7 +262,7 @@
 						<section>
 							<div class="mb-4 flex items-baseline gap-3">
 								<h2
-									class="font-display text-sm font-semibold uppercase tracking-[0.18em] text-muted"
+									class="font-display text-sm font-semibold tracking-[0.18em] text-muted uppercase"
 								>
 									{group.label}
 								</h2>

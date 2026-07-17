@@ -75,7 +75,7 @@
 		</svg>
 		{#if alertStore.unseen > 0}
 			<span
-				class="absolute -right-0.5 -top-0.5 grid h-4 min-w-4 place-items-center rounded-full bg-red-500 px-1 text-[10px] font-semibold leading-none text-white tabular-nums"
+				class="absolute -top-0.5 -right-0.5 grid h-4 min-w-4 place-items-center rounded-full bg-red-500 px-1 text-[10px] leading-none font-semibold text-white tabular-nums"
 			>
 				{alertStore.unseen > 9 ? '9+' : alertStore.unseen}
 			</span>
@@ -117,7 +117,7 @@
 
 			<!-- ── Power-draw thresholds ─────────────────────────────────────── -->
 			<div class="border-t border-line bg-raised/40 px-4 py-3">
-				<p class="mb-2 font-display text-xs font-semibold uppercase tracking-[0.14em] text-muted">
+				<p class="mb-2 font-display text-xs font-semibold tracking-[0.14em] text-muted uppercase">
 					Power alerts
 				</p>
 				{#if metered.length === 0}
@@ -140,7 +140,7 @@
 										placeholder="—"
 										value={alertStore.thresholds[device.id] ?? ''}
 										onchange={(e) => onThresholdChange(device.id, e.currentTarget.value)}
-										class="w-16 rounded-md border border-line bg-surface px-2 py-1 text-right text-sm text-ink outline-none transition-colors focus:border-accent"
+										class="w-16 rounded-md border border-line bg-surface px-2 py-1 text-right text-sm text-ink transition-colors outline-none focus:border-accent"
 									/>
 									W
 								</span>

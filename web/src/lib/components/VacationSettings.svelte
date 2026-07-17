@@ -116,7 +116,7 @@
 
 	<!-- ── Targets: devices + rooms ───────────────────────────────────────── -->
 	<div class="flex flex-col gap-2">
-		<span class="text-xs font-medium uppercase tracking-wide text-faint">Lights to simulate</span>
+		<span class="text-xs font-medium tracking-wide text-faint uppercase">Lights to simulate</span>
 		{#if groupStore.groups.length}
 			<div class="flex flex-col gap-1.5">
 				<span class="text-xs text-muted">Rooms</span>
@@ -165,7 +165,7 @@
 	<!-- ── Active window ──────────────────────────────────────────────────── -->
 	<div class="flex flex-wrap items-end gap-5">
 		<label class="flex flex-col gap-1.5">
-			<span class="text-xs font-medium uppercase tracking-wide text-faint">Start</span>
+			<span class="text-xs font-medium tracking-wide text-faint uppercase">Start</span>
 			<input
 				type="time"
 				bind:value={start}
@@ -174,7 +174,7 @@
 			<span class="text-xs text-faint">Blank = sunset (or 19:00 without a location)</span>
 		</label>
 		<label class="flex flex-col gap-1.5">
-			<span class="text-xs font-medium uppercase tracking-wide text-faint">End</span>
+			<span class="text-xs font-medium tracking-wide text-faint uppercase">End</span>
 			<input
 				type="time"
 				bind:value={end}
@@ -187,7 +187,7 @@
 	<!-- ── Switch interval ────────────────────────────────────────────────── -->
 	<div class="flex flex-wrap items-end gap-5">
 		<label class="flex flex-col gap-1.5">
-			<span class="text-xs font-medium uppercase tracking-wide text-faint">Min interval (min)</span>
+			<span class="text-xs font-medium tracking-wide text-faint uppercase">Min interval (min)</span>
 			<input
 				type="number"
 				min="1"
@@ -196,7 +196,7 @@
 			/>
 		</label>
 		<label class="flex flex-col gap-1.5">
-			<span class="text-xs font-medium uppercase tracking-wide text-faint">Max interval (min)</span>
+			<span class="text-xs font-medium tracking-wide text-faint uppercase">Max interval (min)</span>
 			<input
 				type="number"
 				min="1"

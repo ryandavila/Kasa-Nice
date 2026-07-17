@@ -110,7 +110,7 @@
 				<dl class="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
 					{#each [{ k: 'Now', v: fmt(summary.total_power_w, 1), unit: 'W', cost: null }, { k: 'Today', v: fmt(summary.today_kwh), unit: 'kWh', cost: summary.today_cost }, { k: 'This month', v: fmt(summary.month_kwh), unit: 'kWh', cost: summary.month_cost }] as s (s.k)}
 						<div class="rounded-xl border border-line bg-raised/50 px-3 py-2.5">
-							<dt class="text-[11px] uppercase tracking-wide text-faint">{s.k}</dt>
+							<dt class="text-[11px] tracking-wide text-faint uppercase">{s.k}</dt>
 							<dd class="mt-0.5 font-display text-xl font-semibold text-ink">
 								{s.v}<span class="ml-1 text-xs font-normal text-muted">{s.unit}</span>
 							</dd>
@@ -160,7 +160,7 @@
 					<dl class="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
 						{#each [{ k: 'Now', v: fmt(u.current_power_w, 1), unit: 'W', cost: null }, { k: 'Today', v: fmt(u.today_kwh), unit: 'kWh', cost: u.today_cost }, { k: 'This month', v: fmt(u.month_kwh), unit: 'kWh', cost: u.month_cost }, { k: 'Voltage', v: fmt(u.voltage, 0), unit: 'V', cost: null }] as s (s.k)}
 							<div class="rounded-xl border border-line bg-raised/50 px-3 py-2.5">
-								<dt class="text-[11px] uppercase tracking-wide text-faint">{s.k}</dt>
+								<dt class="text-[11px] tracking-wide text-faint uppercase">{s.k}</dt>
 								<dd class="mt-0.5 font-display text-xl font-semibold text-ink">
 									{s.v}<span class="ml-1 text-xs font-normal text-muted">{s.unit}</span>
 								</dd>
@@ -176,7 +176,7 @@
 					<div class="mt-6 grid gap-6 lg:grid-cols-2">
 						<div>
 							<h4
-								class="mb-3 font-display text-xs font-semibold uppercase tracking-[0.18em] text-muted"
+								class="mb-3 font-display text-xs font-semibold tracking-[0.18em] text-muted uppercase"
 							>
 								This month · daily
 							</h4>
@@ -184,7 +184,7 @@
 						</div>
 						<div>
 							<h4
-								class="mb-3 font-display text-xs font-semibold uppercase tracking-[0.18em] text-muted"
+								class="mb-3 font-display text-xs font-semibold tracking-[0.18em] text-muted uppercase"
 							>
 								This year · monthly
 							</h4>
@@ -199,7 +199,7 @@
 							<div class="mb-4 flex items-center gap-2">
 								<Icon name="chart" size={14} class="text-faint" />
 								<span
-									class="font-display text-xs font-semibold uppercase tracking-[0.18em] text-muted"
+									class="font-display text-xs font-semibold tracking-[0.18em] text-muted uppercase"
 								>
 									Recorded history
 								</span>
@@ -207,7 +207,7 @@
 							<div class="grid gap-6 lg:grid-cols-2">
 								<div>
 									<h4
-										class="mb-3 font-display text-xs font-semibold uppercase tracking-[0.18em] text-muted"
+										class="mb-3 font-display text-xs font-semibold tracking-[0.18em] text-muted uppercase"
 									>
 										Last 24h · power
 									</h4>
@@ -215,7 +215,7 @@
 								</div>
 								<div>
 									<h4
-										class="mb-3 font-display text-xs font-semibold uppercase tracking-[0.18em] text-muted"
+										class="mb-3 font-display text-xs font-semibold tracking-[0.18em] text-muted uppercase"
 									>
 										Last 30 days · daily
 									</h4>

@@ -60,7 +60,7 @@
 		<section>
 			<div class="mb-4 flex items-baseline gap-3">
 				<h2
-					class="flex items-center gap-1.5 font-display text-sm font-semibold uppercase tracking-[0.18em] text-muted"
+					class="flex items-center gap-1.5 font-display text-sm font-semibold tracking-[0.18em] text-muted uppercase"
 				>
 					<Icon name="star-filled" size={14} class="text-accent-ink" />
 					Favorites
@@ -146,11 +146,11 @@
 							if (e.key === 'Escape') editingId = null;
 						}}
 						aria-label="Room name"
-						class="h-8 rounded-lg border border-accent bg-surface px-2 font-display text-sm font-semibold uppercase tracking-[0.12em] text-ink outline-none"
+						class="h-8 rounded-lg border border-accent bg-surface px-2 font-display text-sm font-semibold tracking-[0.12em] text-ink uppercase outline-none"
 					/>
 				{:else}
 					<h2
-						class="flex items-center gap-1.5 font-display text-sm font-semibold uppercase tracking-[0.18em] text-muted"
+						class="flex items-center gap-1.5 font-display text-sm font-semibold tracking-[0.18em] text-muted uppercase"
 					>
 						<Icon name="home" size={14} />
 						{room.name}
@@ -203,7 +203,7 @@
 	{#if unassigned.length}
 		<section>
 			<div class="mb-4 flex items-baseline gap-3">
-				<h2 class="font-display text-sm font-semibold uppercase tracking-[0.18em] text-muted">
+				<h2 class="font-display text-sm font-semibold tracking-[0.18em] text-muted uppercase">
 					{rooms.length ? 'No room' : 'All devices'}
 				</h2>
 				<span class="h-px grow bg-line"></span>

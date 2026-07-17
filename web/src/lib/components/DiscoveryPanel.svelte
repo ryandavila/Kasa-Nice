@@ -116,7 +116,7 @@
 
 		<div class="my-6 flex items-center gap-3 text-faint">
 			<span class="h-px grow bg-line"></span>
-			<span class="text-xs font-medium uppercase tracking-wider">or a single host</span>
+			<span class="text-xs font-medium tracking-wider uppercase">or a single host</span>
 			<span class="h-px grow bg-line"></span>
 		</div>
 

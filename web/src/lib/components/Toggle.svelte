@@ -32,7 +32,7 @@
 	style={checked ? 'box-shadow: 0 0 0 4px var(--accent-soft), 0 0 14px -2px var(--glow);' : ''}
 >
 	<span
-		class="{dims.knob} absolute left-0 top-1/2 -translate-y-1/2 rounded-full bg-white shadow-sm transition-transform duration-300
+		class="{dims.knob} absolute top-1/2 left-0 -translate-y-1/2 rounded-full bg-white shadow-sm transition-transform duration-300
 			{checked ? dims.on : dims.off}"
 		style="transition-timing-function: cubic-bezier(0.34, 1.56, 0.64, 1);"
 	></span>

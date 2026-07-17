@@ -25,7 +25,7 @@
 		</div>
 
 		<div class="min-w-0 grow">
-			<h3 class="truncate font-display text-lg font-semibold leading-tight text-muted">
+			<h3 class="truncate font-display text-lg leading-tight font-semibold text-muted">
 				{device.alias}
 			</h3>
 			<p class="mt-0.5 truncate font-mono text-[11px] tracking-tight text-faint">{meta}</p>

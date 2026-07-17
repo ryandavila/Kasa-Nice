@@ -40,5 +40,5 @@
 		style={fill}
 		aria-label="Brightness"
 	/>
-	<span class="w-9 text-right font-mono text-xs tabular-nums text-muted">{display}%</span>
+	<span class="w-9 text-right font-mono text-xs text-muted tabular-nums">{display}%</span>
 </div>

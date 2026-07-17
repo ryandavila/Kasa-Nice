@@ -293,11 +293,11 @@
 						/>
 						<div class="min-w-0 grow">
 							<div class="flex items-baseline gap-2">
-								<span class="font-display text-lg font-semibold tabular-nums text-ink"
+								<span class="font-display text-lg font-semibold text-ink tabular-nums"
 									>{triggerHeadline(rule)}</span
 								>
 								<span
-									class="rounded-full px-2 py-0.5 text-xs font-semibold uppercase tracking-wide {rule.action ===
+									class="rounded-full px-2 py-0.5 text-xs font-semibold tracking-wide uppercase {rule.action ===
 									'off'
 										? 'bg-raised text-muted'
 										: 'bg-accent-soft text-accent-ink'}"
@@ -346,7 +346,7 @@
 	>
 		<!-- Trigger kind -->
 		<div class="flex flex-col gap-1.5">
-			<span class="text-xs font-medium uppercase tracking-wide text-faint">Trigger</span>
+			<span class="text-xs font-medium tracking-wide text-faint uppercase">Trigger</span>
 			<div class="inline-flex flex-wrap gap-1 rounded-lg border border-line bg-surface p-1">
 				{#each KINDS as k (k.v)}
 					<button
@@ -368,7 +368,7 @@
 			<!-- Trigger detail: time / offset / datetime, per kind -->
 			{#if fKind === 'fixed_time'}
 				<label class="flex flex-col gap-1.5">
-					<span class="text-xs font-medium uppercase tracking-wide text-faint">Time</span>
+					<span class="text-xs font-medium tracking-wide text-faint uppercase">Time</span>
 					<input
 						type="time"
 						bind:value={fTime}
@@ -377,7 +377,7 @@
 				</label>
 			{:else if fKind === 'once'}
 				<label class="flex flex-col gap-1.5">
-					<span class="text-xs font-medium uppercase tracking-wide text-faint">Date &amp; time</span
+					<span class="text-xs font-medium tracking-wide text-faint uppercase">Date &amp; time</span
 					>
 					<input
 						type="datetime-local"
@@ -387,7 +387,7 @@
 				</label>
 			{:else}
 				<label class="flex flex-col gap-1.5">
-					<span class="text-xs font-medium uppercase tracking-wide text-faint"
+					<span class="text-xs font-medium tracking-wide text-faint uppercase"
 						>Offset (minutes)</span
 					>
 					<input
@@ -402,7 +402,7 @@
 
 			<!-- Action -->
 			<label class="flex flex-col gap-1.5">
-				<span class="text-xs font-medium uppercase tracking-wide text-faint">Action</span>
+				<span class="text-xs font-medium tracking-wide text-faint uppercase">Action</span>
 				<div class="inline-flex h-10 rounded-lg border border-line bg-surface p-1">
 					{#each [{ v: 'on', l: 'Turn on' }, { v: 'off', l: 'Turn off' }, { v: 'scene', l: 'Scene' }] as opt (opt.v)}
 						<button
@@ -421,7 +421,7 @@
 			<!-- Target (on/off) or scene picker -->
 			{#if fAction === 'scene'}
 				<label class="flex min-w-48 grow flex-col gap-1.5">
-					<span class="text-xs font-medium uppercase tracking-wide text-faint">Scene</span>
+					<span class="text-xs font-medium tracking-wide text-faint uppercase">Scene</span>
 					<select
 						bind:value={fScene}
 						class="h-10 rounded-lg border border-line bg-surface px-3 text-ink outline-none focus:border-accent"
@@ -434,7 +434,7 @@
 				</label>
 			{:else}
 				<label class="flex min-w-48 grow flex-col gap-1.5">
-					<span class="text-xs font-medium uppercase tracking-wide text-faint">Target</span>
+					<span class="text-xs font-medium tracking-wide text-faint uppercase">Target</span>
 					<select
 						bind:value={fTarget}
 						class="h-10 rounded-lg border border-line bg-surface px-3 text-ink outline-none focus:border-accent"
@@ -474,7 +474,7 @@
 		{#if needsDays}
 			<div class="flex flex-col gap-1.5">
 				<div class="flex items-center justify-between">
-					<span class="text-xs font-medium uppercase tracking-wide text-faint">Days</span>
+					<span class="text-xs font-medium tracking-wide text-faint uppercase">Days</span>
 					<button
 						type="button"
 						onclick={selectAllDays}

@@ -113,7 +113,7 @@
 	>
 		<!-- energized wash -->
 		<div
-			class="pointer-events-none absolute -right-10 -top-14 h-32 w-32 rounded-full blur-2xl transition-opacity duration-500"
+			class="pointer-events-none absolute -top-14 -right-10 h-32 w-32 rounded-full blur-2xl transition-opacity duration-500"
 			style="background: var(--glow); opacity: {live ? 0.18 : 0};"
 		></div>
 
@@ -142,11 +142,11 @@
 								cancelTitle();
 							}
 						}}
-						class="w-full rounded-lg border border-accent/50 bg-raised px-2 py-0.5 font-display text-lg font-semibold leading-tight text-ink outline-none focus:border-accent"
+						class="w-full rounded-lg border border-accent/50 bg-raised px-2 py-0.5 font-display text-lg leading-tight font-semibold text-ink outline-none focus:border-accent"
 					/>
 				{:else}
 					<h3
-						class="flex items-center gap-1.5 font-display text-lg font-semibold leading-tight text-ink"
+						class="flex items-center gap-1.5 font-display text-lg leading-tight font-semibold text-ink"
 					>
 						<span class="truncate">{device.alias}</span>
 						{#if device.can_rename}
@@ -190,7 +190,7 @@
 								role="menu"
 								class="animate-rise absolute right-0 z-30 mt-2 w-40 overflow-hidden rounded-card border border-line bg-surface py-1 shadow-[0_18px_40px_-20px_var(--glow)]"
 							>
-								<p class="px-3 py-1.5 text-xs font-medium uppercase tracking-wide text-faint">
+								<p class="px-3 py-1.5 text-xs font-medium tracking-wide text-faint uppercase">
 									Turn off in
 								</p>
 								{#each TIMER_PRESETS as mins (mins)}

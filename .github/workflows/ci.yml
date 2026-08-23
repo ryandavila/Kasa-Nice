@@ -23,6 +23,13 @@ jobs:
       - name: Install bun
         uses: oven-sh/setup-bun@v2
 
+      # vitest runs under Node, not bun. Pin it so the runner's default can't
+      # drift below what jsdom requires (>=22.22.2 / >=24.15.0 / >=26).
+      - name: Install Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "26"
+
       - name: Install Python dependencies
         run: uv sync --dev
 
@@ -50,6 +57,13 @@ jobs:
 
       - name: Install bun
         uses: oven-sh/setup-bun@v2
+
+      # vitest runs under Node, not bun. Pin it so the runner's default can't
+      # drift below what jsdom requires (>=22.22.2 / >=24.15.0 / >=26).
+      - name: Install Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "26"
 
       - name: Install Python dependencies
         run: uv sync --dev

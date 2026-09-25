@@ -38,8 +38,9 @@ References:
 ## Publishing (after the final repository name is in place)
 
 1. Add a reviewed publishing workflow for amd64 and arm64 images, with CI gates,
-   `packages: write`, GITHUB_TOKEN, repository source labels, main/latest and
-   release-version tags. No publishing workflow exists yet.
+   `packages: write`, GITHUB_TOKEN, and repository source labels. Implemented in
+   `.github/workflows/publish.yml`: stable release tags publish; manual runs only
+   validate. Follow [publishing.md](publishing.md) for first-publication steps.
 2. Publish the image, make the GHCR package public, and verify an anonymous pull
    and clean startup. Repository visibility does not imply package visibility.
 3. Update Compose/install docs to use the verified image.

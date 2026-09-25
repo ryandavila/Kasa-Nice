@@ -1,0 +1,6 @@
+# Use after the first image has been published and made public:
+# docker compose -f compose.yml -f compose.ghcr.yml pull
+# docker compose -f compose.yml -f compose.ghcr.yml up -d --no-build
+services:
+  kasabuena:
+    image: ghcr.io/ryandavila/kasabuena:${KASABUENA_IMAGE_TAG:-1.0.0}

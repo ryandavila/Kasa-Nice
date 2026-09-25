@@ -64,6 +64,23 @@ docker compose up -d
 > a separate subnet or VLAN, set `KASA_SCAN_SUBNET` and the server sweeps it by
 > unicast instead.
 
+### Prebuilt container (after the first GHCR release)
+
+Release images are published to `ghcr.io/ryandavila/kasabuena` for Linux amd64
+and arm64. Once version `1.0.0` has been published and made public, use the
+same checkout and data directories with the image override:
+
+```bash
+docker compose -f compose.yml -f compose.ghcr.yml pull
+docker compose -f compose.yml -f compose.ghcr.yml up -d --no-build
+```
+
+The override defaults to `1.0.0`. Set `KASABUENA_IMAGE_TAG` in `.env` to select
+another release or `latest` (the most recently published stable release).
+Use the same two `-f` arguments for subsequent Compose commands. The standard
+`compose.yml` continues to support local builds. Maintainers can follow the
+[publishing instructions](docs/publishing.md).
+
 ### Local (without Docker)
 
 ```bash

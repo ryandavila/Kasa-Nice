@@ -2,7 +2,7 @@
 
 Target repository: `ryandavila/KasaBuena`; Python distribution and command:
 `kasabuena`; planned container: `ghcr.io/ryandavila/kasabuena`.
-First branded release: `v2.0.0` (application version `2.0.0`). The private
+First branded release: `v1.0.0` (application version `1.0.0`). The private
 frontend package has its own internal version and is not published to npm.
 
 ## Local preparation
@@ -43,7 +43,7 @@ References:
 2. Publish the image, make the GHCR package public, and verify an anonymous pull
    and clean startup. Repository visibility does not imply package visibility.
 3. Update Compose/install docs to use the verified image.
-4. Ensure application version and tag agree, then create `v2.0.0` and release notes
+4. Ensure application version and tag agree, then create `v1.0.0` and release notes
    describing the CLI/service rename and compatible data/backup format.
 5. Upgrade the live deployment using the README migration instructions.
 6. Optional follow-up: dependency-update automation.

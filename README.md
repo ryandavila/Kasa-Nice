@@ -75,7 +75,7 @@ just run          # builds the frontend, then serves it from the API at :8080
 
 ## Upgrading from Kasa-Nice
 
-KasaBuena 2.0.0 renames the installed command to `kasabuena` and the Docker
+KasaBuena 1.0.0 renames the installed command to `kasabuena` and the Docker
 Compose service to `kasabuena`. Update scripts that use `kasa-nice` or
 `docker compose exec kasa-nice`.
 

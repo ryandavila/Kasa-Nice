@@ -1,6 +1,6 @@
 {
-	"name": "Kasa Nice",
-	"short_name": "Kasa",
+	"name": "KasaBuena",
+	"short_name": "KasaBuena",
 	"description": "Control your TP-Link Kasa smart home devices on your local network.",
 	"display": "standalone",
 	"start_url": "/",

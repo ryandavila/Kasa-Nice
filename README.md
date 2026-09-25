@@ -1,4 +1,4 @@
-# Kasa-Nice
+# KasaBuena
 
 A modern, containerized web app for controlling TP-Link Kasa smart home devices
 on your local network — no cloud account required.
@@ -10,13 +10,13 @@ A **FastAPI** backend ([`api/`](api/)) talks to your devices via
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/devices-dark.png">
-    <img src="docs/screenshots/devices-light.png" alt="Kasa-Nice devices tab, showing a lamp, bulb, power strip, and plugs" width="100%">
+    <img src="docs/screenshots/devices-light.png" alt="KasaBuena devices tab, showing a lamp, bulb, power strip, and plugs" width="100%">
   </picture>
 </p>
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/energy-dark.png">
-    <img src="docs/screenshots/energy-light.png" alt="Kasa-Nice energy tab, showing whole-home totals, insights, and per-device usage charts" width="100%">
+    <img src="docs/screenshots/energy-light.png" alt="KasaBuena energy tab, showing whole-home totals, insights, and per-device usage charts" width="100%">
   </picture>
 </p>
 
@@ -51,8 +51,8 @@ regenerate with <code>just screenshots</code>.</sub>
 ### Docker (recommended)
 
 ```bash
-git clone https://github.com/ryandavila/Kasa-Nice.git
-cd Kasa-Nice
+git clone https://github.com/ryandavila/KasaBuena.git
+cd KasaBuena
 docker compose up -d
 # open http://localhost:8080
 ```
@@ -67,11 +67,35 @@ docker compose up -d
 ### Local (without Docker)
 
 ```bash
-git clone https://github.com/ryandavila/Kasa-Nice.git
-cd Kasa-Nice
+git clone https://github.com/ryandavila/KasaBuena.git
+cd KasaBuena
 uv sync
 just run          # builds the frontend, then serves it from the API at :8080
 ```
+
+## Upgrading from Kasa-Nice
+
+KasaBuena 2.0.0 renames the installed command to `kasabuena` and the Docker
+Compose service to `kasabuena`. Update scripts that use `kasa-nice` or
+`docker compose exec kasa-nice`.
+
+1. Download both backups from Settings (configuration JSON and energy history).
+2. Before updating the checkout, stop the old deployment with `docker compose down`
+   from its existing directory. For a local installation, stop its server process.
+3. Update the checkout. Keep your `.env`, `data/`, and `logs/` in that directory;
+   if moving to a new checkout, copy them while the old server is stopped.
+   Compose mounts these paths relative to the checkout, including the complete
+   `data/` directory, so an empty new directory would appear to lose your settings.
+4. For Docker, run `docker compose up -d --build`. For a local installation,
+   run `uv sync`, `cd web && bun install --frozen-lockfile && cd ..`, then `just run`.
+5. Verify your devices, rooms, schedules, and energy history before removing any
+   old deployment files.
+
+Existing JSON and energy-history backups remain compatible; only download
+filenames change. Environment variables, persisted filenames, and browser
+storage keys remain unchanged. Keep the same browser URL (scheme, hostname,
+and port) to retain browser preferences. An installed PWA may need to be
+reinstalled to display its updated name.
 
 ## API
 
@@ -90,6 +114,11 @@ schema, and example) is served at `http://localhost:8080/docs`. In brief:
 | Vacation | presence-simulation config and live status |
 
 ## Configuration
+
+The KasaBuena rebrand preserves all `KASA_*` environment variables, browser
+localStorage keys (such as `kasa-grouping` and `kasa-theme`), and persisted
+`data/` filenames. Existing configuration, preferences, and backups remain
+compatible. The log path stays `logs/kasa_nice.log` as well.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
@@ -220,7 +249,7 @@ All devices supported by python-kasa, including:
 - Confirm devices are powered on and on the same network segment as the host.
 - In Docker (bridge mode), broadcast discovery won't work — add devices by IP in
   the Discovery tab, or use host networking on Linux.
-- Verify with python-kasa directly: `docker compose exec kasa-nice uv run kasa discover`.
+- Verify with python-kasa directly: `docker compose exec kasabuena uv run kasa discover`.
 
 **Permission issues**
 - Ensure `./logs` and `./data` are writable by the container/user (both are
@@ -230,12 +259,12 @@ Logs go to the console and `./logs/kasa_nice.log` (rotated, 10 MB × 5).
 
 ## License
 
-This project is licensed under the terms specified in the [LICENSE](LICENSE) file.
+This project remains licensed under GPL-3.0; see [LICENSE](LICENSE).
 
 ## Credits
 
-A fork and modernization of the original
-[Kasa-Nice](https://github.com/uni-byte/Kasa-Nice) by
+Originally forked from
+[uni-byte/Kasa-Nice](https://github.com/uni-byte/Kasa-Nice) by
 [uni-byte](https://github.com/uni-byte), since rebuilt as a FastAPI + SvelteKit
 application. Built on
 [python-kasa](https://github.com/python-kasa/python-kasa),

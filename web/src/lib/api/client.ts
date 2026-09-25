@@ -24,7 +24,7 @@ import type {
 } from './types';
 
 /**
- * Thin client for the Kasa-Nice FastAPI backend. Paths are relative so the same
+ * Thin client for the KasaBuena FastAPI backend. Paths are relative so the same
  * code works behind the Vite dev proxy and when served by the backend in prod.
  */
 
@@ -256,11 +256,11 @@ async function downloadFile(path: string, filename: string): Promise<void> {
 }
 
 /** Download the backup document as a file (browser save dialog / downloads folder). */
-export const downloadBackupFile = () => downloadFile('/backup', 'kasa-nice-backup.json');
+export const downloadBackupFile = () => downloadFile('/backup', 'kasabuena-backup.json');
 
 /** Download a consistent snapshot of the energy-history SQLite database. */
 export const downloadEnergyDb = () =>
-	downloadFile('/backup/energy.db', 'kasa-nice-energy-history.db');
+	downloadFile('/backup/energy.db', 'kasabuena-energy-history.db');
 // ── Vacation mode (presence simulation) ─────────────────────────────────────
 
 /** Read the vacation config plus live engine status (active + next switch). */

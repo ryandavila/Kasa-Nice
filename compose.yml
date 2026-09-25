@@ -1,5 +1,5 @@
 services:
-  kasa-nice:
+  kasabuena:
     build: .
     # Default (bridge) networking works everywhere, including Docker Desktop on
     # macOS/Windows. Note: broadcast discovery (UDP) does NOT cross the bridge —

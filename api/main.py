@@ -38,7 +38,7 @@ from .vacation import engine as vacation_engine
 logger = get_logger(__name__)
 
 try:
-    __version__ = version("kasa-nice")
+    __version__ = version("kasabuena")
 except PackageNotFoundError:  # not installed (e.g. running from a bare checkout)
     __version__ = "0.0.0"
 
@@ -49,7 +49,7 @@ WEB_BUILD_DIR = Path(__file__).resolve().parent.parent / "web" / "build"
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_logging()
-    logger.info("Starting Kasa-Nice API")
+    logger.info("Starting KasaBuena API")
     if get_settings().kasa_fake_devices:
         # Test-only seam: seed fakes instead of scanning. One flips its state on
         # every read, so the SSE stream surfaces a server-initiated change (the
@@ -144,7 +144,7 @@ def _mount_spa(app: FastAPI) -> None:
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="Kasa-Nice API", version=__version__, lifespan=lifespan)
+    app = FastAPI(title="KasaBuena API", version=__version__, lifespan=lifespan)
 
     # Allow the Vite dev server origin so the frontend can run standalone in dev.
     app.add_middleware(

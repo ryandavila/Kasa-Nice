@@ -1,6 +1,6 @@
-# Kasa-Nice web
+# KasaBuena web
 
-The SvelteKit frontend for Kasa-Nice — a single-page app for discovering and
+The SvelteKit frontend for KasaBuena — a single-page app for discovering and
 controlling TP-Link Kasa devices. It talks to the FastAPI backend (`../api`)
 over a small REST API and polls for live device state.
 

@@ -65,7 +65,7 @@ class BackupStore {
 			return;
 		}
 		if (!parsed || typeof parsed !== 'object' || !('backup_version' in parsed)) {
-			toasts.push('That file does not look like a Kasa-Nice backup', 'error');
+			toasts.push('That file does not look like a KasaBuena backup', 'error');
 			return;
 		}
 		this.pending = parsed as BackupDocument;

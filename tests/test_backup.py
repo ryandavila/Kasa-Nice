@@ -9,6 +9,7 @@ restore are exercised end to end.
 
 import asyncio
 import sqlite3
+from importlib.metadata import version
 from unittest.mock import AsyncMock
 
 import pytest
@@ -94,7 +95,7 @@ def _seed(stores, registry):
 def test_backup_document_shape_and_version(client):
     body = client.get("/api/backup").json()
     assert body["backup_version"] == CURRENT_BACKUP_VERSION
-    assert body["app_version"]
+    assert body["app_version"] == version("kasabuena")
     assert body["created_at"]
     assert body["groups"] == []
     assert body["known_devices"] == []
@@ -104,7 +105,7 @@ def test_backup_download_has_attachment_header(client):
     r = client.get("/api/backup")
     assert r.status_code == 200
     assert "attachment" in r.headers["content-disposition"]
-    assert "kasa-nice-backup.json" in r.headers["content-disposition"]
+    assert "kasabuena-backup.json" in r.headers["content-disposition"]
 
 
 def test_backup_includes_every_store(client, stores, registry):
@@ -229,6 +230,7 @@ def test_energy_db_streams_a_valid_sqlite_file(client, stores, tmp_path):
     r = client.get("/api/backup/energy.db")
     assert r.status_code == 200
     assert r.headers["content-type"] == "application/vnd.sqlite3"
+    assert "kasabuena-energy-history.db" in r.headers["content-disposition"]
     assert "attachment" in r.headers["content-disposition"]
 
     out = tmp_path / "downloaded.db"

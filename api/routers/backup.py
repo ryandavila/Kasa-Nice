@@ -58,15 +58,15 @@ logger = get_logger(__name__)
 router = APIRouter(prefix="/api/backup")
 
 try:
-    _APP_VERSION = version("kasa-nice")
+    _APP_VERSION = version("kasabuena")
 except PackageNotFoundError:  # not installed (e.g. running from a bare checkout)
     _APP_VERSION = "0.0.0"
 
 # Filenames offered via Content-Disposition. Static (not timestamped): the
 # browser's own "(1)"-style dedup on repeat downloads is enough, and a fixed
 # name makes the restore file picker's "did I pick the right file" check easy.
-_JSON_FILENAME = "kasa-nice-backup.json"
-_ENERGY_DB_FILENAME = "kasa-nice-energy-history.db"
+_JSON_FILENAME = "kasabuena-backup.json"
+_ENERGY_DB_FILENAME = "kasabuena-energy-history.db"
 
 
 def _build_document() -> BackupDocument:
@@ -165,7 +165,7 @@ def _consistent_snapshot(src: Path) -> Iterator[Path]:
     buffering of the whole DB; the caller (this context manager) removes it
     afterwards even if streaming fails partway.
     """
-    fd, tmp_name = tempfile.mkstemp(suffix=".db", prefix="kasa-nice-energy-")
+    fd, tmp_name = tempfile.mkstemp(suffix=".db", prefix="kasabuena-energy-")
     os.close(fd)
     tmp_path = Path(tmp_name)
     try:

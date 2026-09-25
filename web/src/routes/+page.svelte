@@ -88,7 +88,7 @@
 </script>
 
 <svelte:head>
-	<title>Kasa Nice — Smart Home Control</title>
+	<title>KasaBuena — Smart Home Control</title>
 </svelte:head>
 
 <div class="mx-auto min-h-dvh max-w-5xl px-4 pb-24 sm:px-6">
@@ -101,7 +101,7 @@
 				<Icon name="bolt" size={18} stroke={2} />
 			</span>
 			<span class="font-display text-xl font-semibold tracking-tight text-ink">
-				Kasa<span class="text-faint">Nice</span>
+				Kasa<span class="text-faint">Buena</span>
 			</span>
 		</button>
 

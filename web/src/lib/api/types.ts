@@ -356,7 +356,7 @@ export interface BackupDocument {
 	backup_version: number;
 	/** ISO 8601 UTC timestamp the backup was generated. */
 	created_at: string;
-	/** kasa-nice version that produced this backup. */
+	/** kasabuena version that produced this backup. */
 	app_version: string;
 	groups: Group[];
 	favorites: string[];

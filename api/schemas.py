@@ -656,7 +656,7 @@ class BackupDocument(BaseModel):
     created_at: datetime.datetime = Field(
         description="UTC timestamp the backup was generated, for the user's reference."
     )
-    app_version: str = Field(description="kasa-nice version that produced this backup.")
+    app_version: str = Field(description="kasabuena version that produced this backup.")
 
     groups: list[Group] = Field(default_factory=list)
     favorites: list[str] = Field(default_factory=list)

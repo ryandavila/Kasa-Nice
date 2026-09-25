@@ -1,4 +1,4 @@
-"""Shared test doubles for the Kasa-Nice backend.
+"""Shared test doubles for the KasaBuena backend.
 
 The fakes live in :mod:`api.testing.fake_devices` so the ``KASA_FAKE_DEVICES``
 seam can share them; this module re-exports them so tests keep importing

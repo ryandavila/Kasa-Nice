@@ -22,7 +22,8 @@ test('loads, renders cards, toggles a device, and reflects an SSE-driven change'
 }) => {
 	// 1. App loads.
 	await page.goto('/');
-	await expect(page).toHaveTitle(/Kasa Nice/i);
+	await expect(page).toHaveTitle(/KasaBuena/i);
+	await expect(page.getByRole('button', { name: 'KasaBuena', exact: true })).toBeVisible();
 
 	// 2. Device cards render (headings come from the seeded device aliases).
 	await expect(page.getByRole('heading', { name: 'Living Room Lamp' })).toBeVisible();

@@ -1,4 +1,4 @@
-# Kasa-Nice task runner. Run `just` to list recipes.
+# KasaBuena task runner. Run `just` to list recipes.
 
 # Show available recipes
 default:
@@ -90,7 +90,7 @@ e2e: web-build
     # before the server starts so a slow first download isn't holding a server.
     (cd web && bunx playwright install chromium)
     # An uncommon port so we don't collide with (and silently test against) a real
-    # Kasa-Nice instance a developer may have running on the usual 8080.
+    # KasaBuena instance a developer may have running on the usual 8080.
     port=8199
     base="http://127.0.0.1:${port}"
     # Point every persistence store at a throwaway directory: the fake-device
@@ -199,7 +199,7 @@ logs:
 
 # Get shell access to running container
 shell:
-    docker compose exec kasa-nice /bin/bash
+    docker compose exec kasabuena /bin/bash
 
 # --- Utility ---
 

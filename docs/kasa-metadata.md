@@ -1,10 +1,10 @@
 # Kasa-native device metadata: what we can read, and can we import rooms?
 
 Research question: the Kasa mobile app lets a user name devices, sort them into
-**rooms**, and set a home **location**. Can Kasa-Nice *read* any of that back —
+**rooms**, and set a home **location**. Can KasaBuena *read* any of that back —
 especially rooms/groups — through a **read-only** path we already have (local
 python-kasa, or the TP-Link cloud client in `api/cloud_service.py`), so we could
-seed Kasa-Nice's own rooms from the Kasa side?
+seed KasaBuena's own rooms from the Kasa side?
 
 **Verdict (TL;DR): No — Kasa-app rooms/groups are NOT retrievable via any
 read-only path available to us.** Device *names* (aliases) and a single home
@@ -152,4 +152,4 @@ conclusion is the success criterion.
 (If TP-Link's app-settings endpoint that stores rooms is ever reverse-engineered
 and confirmed stable/read-only, revisit: the import would still match devices by
 **normalized MAC** — the same `_norm_mac` / `stable_device_id` keying rooms
-already use — and merge additively, never deleting existing Kasa-Nice rooms.)
+already use — and merge additively, never deleting existing KasaBuena rooms.)

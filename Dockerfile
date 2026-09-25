@@ -16,10 +16,11 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
 
 # Install Python dependencies
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-dev
+RUN uv sync --frozen --no-dev --no-install-project
 
 # Application code
 COPY api/ ./api/
+RUN uv sync --frozen --no-dev
 
 # Built frontend from stage 1 (served by the API at /)
 COPY --from=web /web/build ./web/build

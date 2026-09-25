@@ -24,3 +24,6 @@ web/.svelte-kit
 
 # Runtime
 logs
+data
+.env
+.env.*

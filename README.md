@@ -242,9 +242,28 @@ recipes), and optionally Docker.
 ```bash
 just setup     # one-time: install Python + frontend deps
 just dev       # API autoreload + frontend HMR in one terminal (http://localhost:5173)
-just fix       # format, lint, typecheck, and test, fixing as it goes
-just ci        # the same checks read-only — the exact suite CI enforces
+just fix       # apply lint fixes, format, then run all checks
+just check     # verify formatting, lint, types, and unit tests (also: just ci)
 ```
+
+Unprefixed quality commands cover both apps: `format`, `format-check`, `lint`,
+`lint-fix`, and `test`. Formatting and lint fixes are explicit; `lint` and
+`check` do not modify source files. Use `api-*` or `web-*` for one app, such as
+`just api-test -k discovery`, `just web-test`, or `just web-test-watch`.
+Type checking currently covers only the frontend.
+
+`just dev 8090` chooses a different API port; `api-dev` and `web-dev` accept
+the same port when run separately. `just run` builds and serves the frontend,
+while `just api-run` reuses the existing build. Browser workflows stay separate:
+`just e2e` runs integration tests and `just screenshots` regenerates README
+images, each using temporary state and fake devices. Both accept an optional port.
+
+Docker tasks use the `docker-` prefix (`docker-up`, `docker-down`,
+`docker-rebuild`, `docker-logs`, `docker-shell`). The original short names still
+work, as do `install`, `dev-install`, and `ci`. Use `api-install-prod` when you
+only need Python runtime dependencies; `setup` installs development dependencies
+for both apps. `clean` removes project caches and builds without traversing
+installed dependencies.
 
 The backend tests fake `python-kasa`, so they run with no devices or network.
 To contribute: fork, branch, add tests where applicable, run `just ci`, and
